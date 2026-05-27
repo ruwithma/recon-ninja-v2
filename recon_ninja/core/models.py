@@ -162,6 +162,24 @@ class ModuleResult:
             "error_message": self.error_message,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ModuleResult":
+        """Deserialize from a dictionary."""
+        findings_raw = data.get("findings", [])
+        findings = [Finding.from_dict(f) for f in findings_raw]
+        output_file = data.get("output_file")
+        if isinstance(output_file, str):
+            output_file = Path(output_file)
+        return cls(
+            module_name=data.get("module_name", ""),
+            status=data.get("status", ""),
+            findings=findings,
+            raw_output=data.get("raw_output", ""),
+            output_file=output_file,
+            duration_seconds=float(data.get("duration_seconds", 0.0)),
+            error_message=data.get("error_message", ""),
+        )
+
 
 @dataclass
 class ScanState:
@@ -218,7 +236,16 @@ class ScanState:
         findings_raw = data.pop("all_findings", [])
         data["all_findings"] = [Finding.from_dict(f) for f in findings_raw]
         results_raw = data.pop("module_results", [])
-        data["module_results"] = []
+        # Reconstruct ModuleResult objects if present in the payload.
+        from_path_results = []
+        for mr in results_raw:
+            try:
+                from_path_results.append(ModuleResult.from_dict(mr))
+            except Exception:
+                # If deserialisation fails for some entries, skip them
+                # but preserve the rest of the state load instead of crashing.
+                continue
+        data["module_results"] = from_path_results
         return cls(**data)
 
     def add_finding(self, finding: Finding) -> None:
