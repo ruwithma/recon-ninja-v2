@@ -22,7 +22,7 @@ from recon_ninja.core.models import (
     ServiceInfo,
     Severity,
 )
-from recon_ninja.core.runner import format_cmd, run_multiple, run_tool
+from recon_ninja.core.runner import run_multiple, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +304,7 @@ class ReconEngine:
             "nmap",
             "-Pn",
             "-sS",
-            f"--top-ports", top_ports,
+            "--top-ports", top_ports,
             "-T4",
             *self.config.extra_nmap_flags,
             self.target,
@@ -462,6 +462,18 @@ class ReconEngine:
                         status="error",
                         error_message=str(exc),
                         duration_seconds=time.monotonic() - t0,
+                    )
+
+                # Some module implementations may return None to indicate
+                # a skipped action; normalize that into a ModuleResult so
+                # the engine records completion and doesn't repeatedly
+                # re-run the module on resume.
+                if result is None:
+                    logger.debug("[module:%s] Module returned None — treating as skipped", name)
+                    result = ModuleResult(
+                        module_name=name,
+                        status="skipped",
+                        error_message="Module returned None",
                     )
 
                 result.duration_seconds = time.monotonic() - t0
@@ -622,7 +634,7 @@ class ReconEngine:
                     Finding(
                         severity=Severity.MEDIUM,
                         title=f"Searchsploit results for {name}",
-                        description=f"Potential exploits found — see output file",
+                        description="Potential exploits found — see output file",
                         evidence=stdout[:2000],
                         module="vuln_correlate",
                     )
@@ -746,16 +758,16 @@ class ReconEngine:
     def _build_markdown_report(self) -> list[str]:
         """Build a Markdown report as a list of lines."""
         lines: list[str] = [
-            f"# ReconNinja — Scan Report",
-            f"",
+            "# ReconNinja — Scan Report",
+            "",
             f"**Target:** {self.target}",
             f"**Box Profile:** {self.state.box_profile}",
             f"**Duration:** {self.state.duration:.1f}s",
             f"**Open Ports:** {', '.join(str(p) for p in self.state.open_ports) or 'None'}",
             f"**Hostnames:** {', '.join(self.state.hostnames) or 'None'}",
-            f"",
-            f"## Services",
-            f"",
+            "",
+            "## Services",
+            "",
         ]
 
         for port, svc in sorted(self.state.services.items()):

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from recon_ninja.core.models import Finding, ModuleResult, ReconConfig, ScanState, Severity
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def _find_vnc_ports(open_ports: list[int]) -> list[int]:
     return sorted(p for p in open_ports if p in VNC_PORT_RANGE)
 
 
+@module_guard()
 async def run_vnc_module(
     target: str,
     state: ScanState,

@@ -12,8 +12,6 @@ Functions are split into two categories:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Iterable
 
 from rich.align import Align
 from rich.console import Console

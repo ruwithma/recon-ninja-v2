@@ -22,6 +22,7 @@ from pathlib import Path
 
 from recon_ninja.core.models import Finding, ModuleResult, ReconConfig, ScanState, Severity
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ def _parse_nmap_krb_users(nmap_output: str) -> list[str]:
     return list(set(users))
 
 
+@module_guard()
 async def run_kerberos_module(
     target: str,
     state: ScanState,

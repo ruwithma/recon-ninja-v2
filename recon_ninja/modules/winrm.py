@@ -25,6 +25,7 @@ from pathlib import Path
 
 from recon_ninja.core.models import Finding, ModuleResult, ReconConfig, ScanState, Severity
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ WINRM_HTTP_PORT = 5985
 WINRM_HTTPS_PORT = 5986
 
 
+@module_guard()
 async def run_winrm_module(
     target: str,
     state: ScanState,
@@ -144,7 +146,7 @@ async def run_winrm_module(
                                 f"connection errors — use -S or --no-ssl-verify."
                             ),
                             module=MODULE_NAME,
-                            evidence=f"Port 5986 (HTTPS) open",
+                            evidence="Port 5986 (HTTPS) open",
                             suggested_commands=[
                                 f"evil-winrm -i {target} -u <USER> -p <PASS> -S",
                             ],
@@ -161,7 +163,7 @@ async def run_winrm_module(
                                 f"in cleartext and can be sniffed on the network."
                             ),
                             module=MODULE_NAME,
-                            evidence=f"Port 5985 (HTTP) open",
+                            evidence="Port 5985 (HTTP) open",
                             suggested_commands=[
                                 f"evil-winrm -i {target} -u <USER> -p <PASS>",
                             ],

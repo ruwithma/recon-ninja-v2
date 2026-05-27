@@ -14,7 +14,6 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-import pytest
 
 from recon_ninja.core.report import generate_reports
 from recon_ninja.core.models import ScanState, ServiceInfo, Finding, Severity

@@ -28,6 +28,7 @@ from recon_ninja.modules.web.web_core import run_web_core
 from recon_ninja.modules.web.web_dirfuzz import run_web_dirfuzz
 from recon_ninja.modules.web.web_vuln import run_web_vuln
 from recon_ninja.modules.web.web_cms import run_web_cms
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ async def _scan_port(
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_web_module(
     target: str,
     state: ScanState,

@@ -17,7 +17,6 @@ Tools and sources used:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -36,6 +35,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +393,7 @@ def _parse_shodan_output(stdout: str, target: str) -> list[Finding]:
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_osint_module(
     target: str, state: ScanState, config: ReconConfig, output_dir: Path
 ) -> ModuleResult:
@@ -461,7 +462,7 @@ async def run_osint_module(
     crtsh_subdomains = _query_crtsh(domain)
     if crtsh_subdomains:
         raw_outputs.append(
-            f"=== crt.sh subdomains ===\n" + "\n".join(crtsh_subdomains)
+            "=== crt.sh subdomains ===\n" + "\n".join(crtsh_subdomains)
         )
         all_subdomains.extend(crtsh_subdomains)
 

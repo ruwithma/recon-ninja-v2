@@ -19,10 +19,10 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any
 
 from recon_ninja.core.models import Finding, ModuleResult, ReconConfig, ScanState, Severity
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,7 @@ def _extract_entries(ldap_output: str) -> dict[str, list[str]]:
     return {"users": users, "groups": groups}
 
 
+@module_guard()
 async def run_ldap_module(
     target: str,
     state: ScanState,

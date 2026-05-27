@@ -18,7 +18,6 @@ Implements Step 1 of the web module specification:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import shutil
@@ -33,6 +32,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,7 @@ def _check_security_headers(headers: dict[str, str], url: str) -> list[Finding]:
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_web_core(
     target: str,
     port: int,

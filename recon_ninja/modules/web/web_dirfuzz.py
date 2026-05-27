@@ -35,6 +35,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +289,7 @@ async def _check_path(
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_web_dirfuzz(
     target: str,
     port: int,

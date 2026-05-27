@@ -15,7 +15,6 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-import pytest
 
 from recon_ninja.core.models import Finding, ModuleResult, ScanState, ServiceInfo, Severity
 

@@ -38,6 +38,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +238,7 @@ def _parse_searchsploit_json(
                 cve=cve,
                 suggested_commands=[
                     f"searchsploit -x {exploit_path}" if exploit_path else "",
-                    f"searchsploit --nmap xml/nmap.xml",
+                    "searchsploit --nmap xml/nmap.xml",
                 ],
             )
         )
@@ -419,6 +420,7 @@ def _web_targets(state: ScanState) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_vuln_correlate_module(
     target: str, state: ScanState, config: ReconConfig, output_dir: Path
 ) -> ModuleResult:

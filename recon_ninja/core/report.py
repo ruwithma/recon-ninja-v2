@@ -442,8 +442,8 @@ def _build_markdown(state: ScanState) -> str:
 
     # 2. Target Information
     lines.append("## Target Information\n")
-    lines.append(f"| Field | Value |")
-    lines.append(f"|-------|-------|")
+    lines.append("| Field | Value |")
+    lines.append("|-------|-------|")
     lines.append(f"| **Target** | `{state.target}` |")
     lines.append(f"| **Hostname** | {state.primary_hostname or '—'} |")
     lines.append(f"| **Box Profile** | {state.box_profile} |")
@@ -572,10 +572,10 @@ def _write_service_details_md(lines: list[str], state: ScanState) -> None:
             if svc.scripts:
                 for script_name, output in svc.scripts.items():
                     lines.append(f"- **{script_name}**:")
-                    lines.append(f"  ```")
+                    lines.append("  ```")
                     for out_line in output.splitlines()[:20]:
                         lines.append(f"  {out_line}")
-                    lines.append(f"  ```")
+                    lines.append("  ```")
             lines.append("")
 
 

@@ -25,6 +25,7 @@ from pathlib import Path
 
 from recon_ninja.core.models import Finding, ModuleResult, ReconConfig, ScanState, Severity
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ async def _enum_mysql(
                 Finding(
                     severity=Severity.MEDIUM,
                     title=f"MySQL User Enumeration on Port {port}",
-                    description=f"MySQL user accounts were enumerated via nmap mysql-enum script.",
+                    description="MySQL user accounts were enumerated via nmap mysql-enum script.",
                     module=MODULE_NAME,
                     evidence=enum_match.group(0).strip()[:2000],
                 )
@@ -756,6 +757,7 @@ _DB_ENUM_FUNCS: dict[str, object] = {
 # ── Main entry point ────────────────────────────────────────────────────
 
 
+@module_guard()
 async def run_database_module(
     target: str,
     state: ScanState,

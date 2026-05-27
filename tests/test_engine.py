@@ -10,13 +10,12 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock
 from datetime import datetime
 
 from recon_ninja.core.engine import ReconEngine, parse_nmap_xml, PHASE_NAMES
-from recon_ninja.core.models import ScanState, ServiceInfo, ReconConfig, Finding, Severity
+from recon_ninja.core.models import ScanState, ServiceInfo, ReconConfig
 
 
 # ---------------------------------------------------------------------------

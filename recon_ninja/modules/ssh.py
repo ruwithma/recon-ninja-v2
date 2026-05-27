@@ -20,6 +20,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ def _get_ssh_port(state: ScanState) -> int | None:
     return None
 
 
+@module_guard()
 async def run_ssh_module(
     target: str,
     state: ScanState,

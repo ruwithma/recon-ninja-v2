@@ -18,7 +18,6 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any
 
 from recon_ninja.core.models import (
     Finding,
@@ -227,6 +226,7 @@ def _parse_nmap_ssl_findings(stdout: str) -> list[Finding]:
         )
 
     if "VULNERABLE" in stdout and "ccs" in stdout.lower():
+
         findings.append(
             Finding(
                 severity=Severity.HIGH,
@@ -325,6 +325,7 @@ def _parse_testssl_findings(stdout: str) -> list[Finding]:
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_ssl_module(
     target: str, state: ScanState, config: ReconConfig, output_dir: Path
 ) -> ModuleResult:

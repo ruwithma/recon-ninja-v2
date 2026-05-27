@@ -7,7 +7,6 @@ Also provides helpers to auto-discover the SecLists base directory.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 # ---------------------------------------------------------------------------

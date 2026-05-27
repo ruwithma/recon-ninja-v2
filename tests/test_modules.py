@@ -6,14 +6,13 @@ and finding generation without requiring any tools installed.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from recon_ninja.core.models import Finding, ModuleResult, ReconConfig, ScanState, ServiceInfo, Severity
+from recon_ninja.core.models import ReconConfig, ScanState, Severity
 from recon_ninja.modules.smb import (
     _parse_smbclient_shares,
     _parse_smbmap_permissions,

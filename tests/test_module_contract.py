@@ -3,7 +3,6 @@ import importlib
 import pkgutil
 
 import recon_ninja.modules as modules_pkg
-from recon_ninja.core import models
 
 
 def _module_iter():

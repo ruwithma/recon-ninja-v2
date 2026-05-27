@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -28,7 +27,6 @@ from typer.core import TyperGroup
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 from recon_ninja import __version__
 from recon_ninja.core.config import load_config, MergeConfig

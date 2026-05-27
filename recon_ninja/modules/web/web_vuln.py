@@ -12,7 +12,6 @@ Implements Step 4 of the web module specification:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import shutil
@@ -27,6 +26,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,7 @@ def _parse_nuclei_findings(raw: str, url: str) -> list[Finding]:
 # ---------------------------------------------------------------------------
 
 
+@module_guard()
 async def run_web_vuln(
     target: str,
     port: int,

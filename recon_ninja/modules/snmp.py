@@ -21,6 +21,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
+from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ def _is_snmp_port(state: ScanState) -> bool:
     return 161 in state.udp_ports
 
 
+@module_guard()
 async def run_snmp_module(
     target: str,
     state: ScanState,
