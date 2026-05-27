@@ -2,7 +2,7 @@
 <img src="https://img.shields.io/badge/version-2.0.0-cyan?style=for-the-badge&labelColor=1a1a2e" alt="version">
 <img src="https://img.shields.io/badge/python-3.10%2B-blue?style=for-the-badge&labelColor=1a1a2e" alt="python">
 <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge&labelColor=1a1a2e" alt="license">
-<img src="https://img.shields.io/badge/status-beta-orange?style=for-the-badge&labelColor=1a1a2e" alt="status">
+<img src="https://img.shields.io/badge/platform-Kali%20%7C%20Parrot%20%7C%20Ubuntu-purple?style=for-the-badge&labelColor=1a1a2e" alt="platform">
 </p>
 
 ```
@@ -253,12 +253,13 @@ blocks the rest of the pipeline.
 18 modules are dispatched in Phase 3 based on the services discovered in
 Phases 1-2. Modules whose required tools are missing are gracefully skipped.
 
-### Web (4 sub-modules)
+### Web (5 sub-modules)
 
 | Sub-module | Purpose | Tools |
 |-----------|---------|-------|
-| `web_core` | Technology fingerprint, headers, robots.txt, screenshots | whatweb, gowitness |
-| `web_dirfuzz` | Directory and vhost fuzzing | feroxbuster, gobuster, ffuf |
+| `web_core` | HTTP fingerprint, headers, robots.txt, sitemap, WAF detection, screenshots | whatweb, wafw00f, gowitness |
+| `web_tech` | Deep technology stack detection (frameworks, CMS, libraries, languages) | Wappalyzer, whatweb, nmap |
+| `web_dirfuzz` | Directory fuzzing, sensitive path probing, vhost enumeration | feroxbuster, gobuster, ffuf |
 | `web_cms` | CMS detection and scanning | wpscan, droopescan, joomscan |
 | `web_vuln` | Web vulnerability scanning | nikto, nuclei |
 
@@ -449,7 +450,8 @@ recon_ninja/
 │   │   ├── __init__.py          # Web module orchestrator
 │   │   ├── web_core.py          # whatweb, headers, robots.txt, screenshots
 │   │   ├── web_dirfuzz.py       # feroxbuster / gobuster / ffuf dir + vhost
-│   │   ├── web_vuln.py          # nikto, nuclei, wafw00f
+│   │   ├── web_tech.py          # Deep tech stack detection (Wappalyzer + custom rules)
+│   │   ├── web_vuln.py          # nikto, nuclei vulnerability scanning
 │   │   └── web_cms.py           # CMS detect → wpscan / droopescan / joomscan + API
 │   ├── smb.py                   # SMB enumeration and share access
 │   ├── ssh.py                   # SSH audit and banner analysis

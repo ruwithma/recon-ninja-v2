@@ -1,93 +1,25 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-local-*
-.claude
-.z-ai-config
-*.log
-dev.log
-dev.out.log
-test
-prompt
-
-server.log
-
-# Skills directory
-/skills/
-
-# ===== Python / Recon Ninja =====
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 *.egg-info/
-dist/
-build/
 *.egg
 .eggs/
+dist/
+build/
 .Python
+*.whl
+
+# Virtual environments
 venv/
 .venv/
 env/
 
-# Recon Ninja scan results
-results/
-
-# Recon Ninja state files
-*.state
-
-# Recon Ninja config (contains API keys)
-.config/
-
-# Database
-*.db
-*.sqlite3
-prisma/*.db
-
-# Uploads / downloads
-upload/
-download/
-
-# Mini services
-mini-services/
+# Type checking / linting caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 
 # IDE
 .idea/
@@ -97,4 +29,45 @@ mini-services/
 *~
 
 # OS
+.DS_Store
 Thumbs.db
+
+# ===== ReconNinja =====
+
+# Scan results (generated at runtime)
+results/
+
+# State checkpoint files
+*.state
+
+# User config (may contain API keys)
+.config/
+
+# Log files
+*.log
+
+# ===== Legacy / unrelated files =====
+# These were part of a Next.js app that shared this repo
+node_modules/
+.next/
+package.json
+package-lock.json
+next.config.ts
+next-env.d.ts
+tsconfig.json
+tailwind.config.ts
+postcss.config.mjs
+eslint.config.mjs
+Caddyfile
+src/
+worklog.md
+
+# Misc
+.vercel
+*.pem
+*.db
+*.sqlite3
+local-*
+.claude
+.z-ai-config
+/skills/

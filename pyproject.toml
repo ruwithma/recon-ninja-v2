@@ -5,19 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reconninja"
 version = "2.0.0"
-description = "🥷 Automated reconnaissance tool for CTFs and pentesting"
+description = "Automated reconnaissance tool for CTFs and pentesting"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "ReconNinja Team"}]
-keywords = ["recon", "pentesting", "ctf", "hackthebox", "oscp", "security"]
+keywords = ["recon", "pentesting", "ctf", "hackthebox", "oscp", "security", "nmap", "enumeration"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
     "Topic :: Security",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console",
 ]
 dependencies = [
     "rich>=13.0",
@@ -28,6 +32,11 @@ dependencies = [
     "jinja2>=3.1",
     "aiofiles>=23.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ruwithma/recon-ninja-v2"
+Repository = "https://github.com/ruwithma/recon-ninja-v2"
+Issues = "https://github.com/ruwithma/recon-ninja-v2/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21", "ruff>=0.13", "mypy>=1.10", "pre-commit>=3.4"]
