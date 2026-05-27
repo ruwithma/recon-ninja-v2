@@ -135,6 +135,10 @@ def _parse_whatweb(raw: str) -> dict[str, str]:
     dict[str, str]
         Mapping of technology name to detected version / detail.
     """
+    # Strip ANSI escape codes
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    raw = ansi_escape.sub('', raw)
+
     tech: dict[str, str] = {}
     for match in re.finditer(r"(\w[\w\s\-]*?)\[([^\]]+)\]", raw):
         name = match.group(1).strip()
@@ -263,7 +267,7 @@ async def run_web_core(
     if shutil.which("whatweb"):
         whatweb_out = output_dir / "whatweb.txt"
         rc, stdout, stderr = await run_tool(
-            cmd=["whatweb", "-a", "3", url],
+            cmd=["whatweb", "-a", "3", "--color=never", url],
             output_file=whatweb_out,
             timeout=config.default_timeout,
         )

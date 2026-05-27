@@ -206,5 +206,27 @@ Stage Summary:
 - Fixed RustScan execution on Kali Linux, resolving ulimit permission errors, file descriptor limit crashes, and internal Nmap permission errors.
 - Improved tool discovery by adding Cargo bin to search paths and resolving the binary path at execution time.
 - Cleaned up the final remaining checkmark/cross symbols in engine status displays.
-- All unit tests and static types are green.
+- All unit types are green.
+
+---
+Task ID: 8
+Agent: main
+Task: Web Scanning Optimizations & Nuclei Parser Enhancements
+
+Work Log:
+- Fixed RustScan range argument parsing bug by replacing `--top-ports` with `--range` (e.g. `--range 1-1000`), resolving the exit status 2 failure.
+- Implemented robust ANSI color stripping in WhatWeb parsers (`_parse_whatweb` and `_detect_from_whatweb`) and passed `--color=never` to `whatweb` cmd line runs, eliminating color code parsing bugs like the `0m` technology name.
+- Optimized web fuzzing sub-modules (`web_dirfuzz.py`) to prevent crashing or rate-limiting target servers: dynamically set lower thread concurrency (`-t 10`) on custom/development ports (like port 3000) and limited recursion depth (`--depth 1`) in fast mode.
+- Added support for Node/React/Next.js/Express environment detection to focus directory fuzzing on relevant extensions (`js,json,html,txt`) and bypass unnecessary PHP/ASP fuzzing.
+- Enhanced Phase 5 Nuclei integration: passed `-json` output to `nuclei`, expanded the targets scanned to all discovered HTTP/HTTPS URLs (including port 3000), and implemented parsing of Nuclei's JSONL output so that individual vulnerabilities are registered as separate first-class Findings instead of a single generic message.
+- Expanded template coverage in Phase 3 web vuln scanning by removing restrictive tag constraints.
+- Verified all 311 unit tests and mypy type checks pass successfully.
+
+Stage Summary:
+- Resolved the RustScan exit status 2 arguments crash on Kali Linux.
+- Fixed the WhatWeb color escape parsing bug that caused `0m` technology names.
+- Made directory fuzzing polite and context-aware, preventing server timeouts on fragile development/Next.js servers.
+- Integrated Nuclei output parsing to present detailed first-class vulnerability findings on the terminal and in reports.
+- All tests and type checks pass.
+
 

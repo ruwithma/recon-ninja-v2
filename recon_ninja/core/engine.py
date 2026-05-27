@@ -301,7 +301,7 @@ class ReconEngine:
             cmd = [
                 rustscan_path,
                 "--addresses", self.target,
-                "--top-ports", top_ports,
+                "--range", f"1-{top_ports}",
                 "--ulimit", str(ulimit_val),
                 "--scripts", "none",
             ]
@@ -703,7 +703,21 @@ class ReconEngine:
 
         # --- nuclei ---
         if shutil.which("nuclei"):
-            nuclei_cmd = ["nuclei", "-u", self.target, "-o", str(self.output_dir / "nuclei.txt")]
+            # Build list of web targets to scan specific ports (e.g. port 3000)
+            web_targets = []
+            for port, svc in self.state.services.items():
+                url = svc.url
+                if url:
+                    web_targets.append(url.replace("TARGET", self.target))
+
+            if not web_targets:
+                web_targets = [self.target]
+
+            nuclei_cmd = ["nuclei"]
+            for wt in web_targets:
+                nuclei_cmd.extend(["-u", wt])
+
+            nuclei_cmd.extend(["-json", "-o", str(self.output_dir / "nuclei.txt")])
             if self.config.nuclei_templates:
                 nuclei_cmd.extend(["-t", self.config.nuclei_templates])
             commands.append(("nuclei", nuclei_cmd, self.output_dir / "nuclei.txt"))
@@ -758,16 +772,23 @@ class ReconEngine:
                             module="vuln_correlate",
                         )
                     )
-            if name == "nuclei" and stdout.strip():
-                self.state.add_finding(
-                    Finding(
-                        severity=Severity.HIGH,
-                        title="Nuclei vulnerability scan results",
-                        description="Vulnerabilities detected by nuclei — see output file",
-                        evidence=stdout[:2000],
-                        module="vuln_correlate",
-                    )
-                )
+            if name == "nuclei":
+                content = ""
+                outfile = self.output_dir / "nuclei.txt"
+                if outfile.is_file():
+                    try:
+                        content = outfile.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
+                        content = stdout
+                else:
+                    content = stdout
+
+                if content.strip():
+                    from recon_ninja.modules.vuln_correlate import _parse_nuclei_output
+                    findings = _parse_nuclei_output(content)
+                    for f in findings:
+                        f.module = "vuln_correlate"
+                        self.state.add_finding(f)
 
     @staticmethod
     def _parse_searchsploit_json(stdout: str, name: str) -> list[str]:

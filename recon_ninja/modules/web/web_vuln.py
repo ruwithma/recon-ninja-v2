@@ -289,7 +289,6 @@ async def run_web_vuln(
         nuclei_cmd: list[str] = [
             "nuclei",
             "-u", url,
-            "-tags", NUCLEI_TAGS,
             "-o", str(nuclei_out),
             "-silent",
         ]

@@ -71,6 +71,7 @@ EXTENSION_MAP: dict[str, str] = {
     "lamp": "php,txt,html,sh,bak",
     "iis": "asp,aspx,txt,html,config",
     "java": "jsp,do,action,java",
+    "node": "js,json,html,txt",
     "generic": "php,html,txt,js,json",
 }
 
@@ -112,6 +113,22 @@ def _determine_extensions(state: ScanState, port: int) -> str:
             tech_stack.add("java")
         if "apache" in title_lower or "nginx" in title_lower or "php" in title_lower:
             tech_stack.add("lamp")
+        if "next.js" in title_lower or "node.js" in title_lower or "react" in title_lower or "express" in title_lower:
+            tech_stack.add("node")
+
+    # Also check detected_techs directly
+    for tech in state.detected_techs:
+        if tech.port != port:
+            continue
+        name_lower = tech.name.lower()
+        if "iis" in name_lower or "asp.net" in name_lower:
+            tech_stack.add("iis")
+        if "tomcat" in name_lower or "jsp" in name_lower or "spring" in name_lower:
+            tech_stack.add("java")
+        if "apache" in name_lower or "nginx" in name_lower or "php" in name_lower:
+            tech_stack.add("lamp")
+        if "next.js" in name_lower or "node.js" in name_lower or "react" in name_lower or "express" in name_lower:
+            tech_stack.add("node")
 
     # Also check product directly
     if "iis" in product:
@@ -127,6 +144,8 @@ def _determine_extensions(state: ScanState, port: int) -> str:
         return EXTENSION_MAP["java"]
     if "lamp" in tech_stack:
         return EXTENSION_MAP["lamp"]
+    if "node" in tech_stack:
+        return EXTENSION_MAP["node"]
 
     return EXTENSION_MAP["generic"]
 
@@ -333,6 +352,9 @@ async def run_web_dirfuzz(
     extensions = _determine_extensions(state, port)
     wordlist = str(config.web_wordlist)
 
+    threads = "10" if port not in (80, 443) else "20"
+    depth = "1" if config.fast_mode else "2"
+
     # ------------------------------------------------------------------
     # 1. Directory fuzzing — feroxbuster or gobuster
     # ------------------------------------------------------------------
@@ -344,8 +366,8 @@ async def run_web_dirfuzz(
                 "-u", url,
                 "-w", wordlist,
                 "-x", extensions,
-                "-t", "20",
-                "--depth", "2",
+                "-t", threads,
+                "--depth", depth,
                 "--scan-limit", "3",
                 "--timeout", "10",
                 "-q",  # quiet mode — only print results
@@ -377,7 +399,7 @@ async def run_web_dirfuzz(
                 "-u", url,
                 "-w", wordlist,
                 "-x", extensions,
-                "-t", "20",
+                "-t", threads,
                 "--timeout", "10s",
                 "-q",
             ],

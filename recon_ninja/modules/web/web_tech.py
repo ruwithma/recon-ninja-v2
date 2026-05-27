@@ -475,6 +475,10 @@ def _detect_from_html(html: str, port: int) -> list[TechInfo]:
 
 def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
     """Parse whatweb output into structured TechInfo objects."""
+    # Strip ANSI escape codes
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    raw = ansi_escape.sub('', raw)
+
     techs: list[TechInfo] = []
 
     whatweb_categories: dict[str, tuple[str, str]] = {
@@ -812,7 +816,7 @@ async def run_web_tech(
     if shutil.which("whatweb"):
         whatweb_out = output_dir / "whatweb_tech.txt"
         rc, stdout, stderr = await run_tool(
-            cmd=["whatweb", "-a", "3", url],
+            cmd=["whatweb", "-a", "3", "--color=never", url],
             output_file=whatweb_out,
             timeout=config.default_timeout,
         )
