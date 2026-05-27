@@ -1,4 +1,4 @@
-"""RDP reconnaissance module for Recon Ninja v2.
+"""RDP reconnaissance module for ReconNinja v2.
 
 Triggered when port 3389 (RDP) is detected open.  Checks encryption
 level, NLA (Network Level Authentication) status, and tests for

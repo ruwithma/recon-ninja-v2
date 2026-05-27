@@ -1,6 +1,6 @@
-# Recon Ninja v2 — Architecture Reference
+# ReconNinja v2 — Architecture Reference
 
-> Internal codebase architecture document for Recon Ninja v2.0.0.
+> Internal codebase architecture document for ReconNinja v2.0.0.
 > Describes the project structure, data flow, pipeline phases, key design
 > patterns, configuration system, tool detection, and auto-installer.
 
@@ -113,7 +113,7 @@ _build_cli_overrides()          # Translate Typer options → nested dict
   ▼
 load_config()                   # 3-layer merge:
   │   1. _DEFAULT_CONFIG (hard-coded dict)
-  │   2. YAML file (config/default_config.yaml + ~/.config/recon-ninja/config.yaml)
+  │   2. YAML file (config/default_config.yaml + ~/.config/reconninja/config.yaml)
   │   3. cli_overrides (highest precedence)
   │
   ▼
@@ -783,8 +783,8 @@ profiles are supported: `WINDOWS_AD`, `WINDOWS_WEB`, `LINUX_WEB`,
 ### Custom CLI Group
 
 `ReconNinjaGroup` extends `TyperGroup` to route unknown first arguments
-to the `scan` command. This enables `recon-ninja 10.10.10.1` as a
-shorthand for `recon-ninja scan 10.10.10.1`.
+to the `scan` command. This enables `reconninja 10.10.10.1` as a
+shorthand for `reconninja scan 10.10.10.1`.
 
 ---
 
@@ -796,7 +796,7 @@ precedence:
 ```
 Built-in defaults (_DEFAULT_CONFIG dict)
         ↓  deep merge
-YAML file (config/default_config.yaml, then ~/.config/recon-ninja/config.yaml)
+YAML file (config/default_config.yaml, then ~/.config/reconninja/config.yaml)
         ↓  deep merge
 CLI overrides (_build_cli_overrides dict)
 ```
@@ -951,7 +951,7 @@ Each `_install_*_tool()` function follows the same pattern:
 
 ### CLI Integration
 
-The `recon-ninja install` command provides:
+The `reconninja install` command provides:
 - `--required`: Install only required tools.
 - `--optional`: Install only optional tools.
 - `-v / --verbose`: Show detailed output.
@@ -984,7 +984,7 @@ The state file is plain JSON (human-readable, diff-friendly).
 
 ### Resume Flow
 
-1. User runs `recon-ninja <target> --resume`.
+1. User runs `reconninja <target> --resume`.
 2. `StateManager.load_state()` deserializes `scan.state`.
 3. `ReconEngine.run()` iterates phases 1–7, skipping any where
    `state.current_phase > phase_num`.

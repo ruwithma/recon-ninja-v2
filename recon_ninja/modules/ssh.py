@@ -1,4 +1,4 @@
-"""SSH reconnaissance module for Recon Ninja v2.
+"""SSH reconnaissance module for ReconNinja v2.
 
 Triggered when port 22 is open or the service is identified as ``ssh``.
 Enumerates authentication methods, supported algorithms, host keys,

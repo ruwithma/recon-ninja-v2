@@ -1,4 +1,4 @@
-"""SMTP reconnaissance module for Recon Ninja v2.
+"""SMTP reconnaissance module for ReconNinja v2.
 
 Triggered when ports 25, 465, or 587 are open or the service is
 identified as ``smtp``.  Enumerates supported commands, tests for

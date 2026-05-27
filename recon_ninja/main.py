@@ -1,15 +1,15 @@
-"""🥷 Recon Ninja v2 — CLI entry point.
+"""🥷 ReconNinja v2 — CLI entry point.
 
 This module defines the ``app`` Typer application that serves as the main
 entry point referenced in ``pyproject.toml``::
 
-    recon-ninja = "recon_ninja.main:app"
+    reconninja = "recon_ninja.main:app"
 
 CLI commands:
-    - ``recon-ninja <target>``  — run a scan (default when a target is given)
-    - ``recon-ninja scan <target>`` — explicit scan command
-    - ``recon-ninja install``   — auto-install all required/optional tools
-    - ``recon-ninja check-tools`` — check tool availability with version info
+    - ``reconninja <target>``  — run a scan (default when a target is given)
+    - ``reconninja scan <target>`` — explicit scan command
+    - ``reconninja install``   — auto-install all required/optional tools
+    - ``reconninja check-tools`` — check tool availability with version info
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ class ReconNinjaGroup(TyperGroup):
 
     If the first positional argument doesn't match a known subcommand,
     it is automatically routed to the ``scan`` command so that
-    ``recon-ninja 10.10.10.1`` works the same as
-    ``recon-ninja scan 10.10.10.1``.
+    ``reconninja 10.10.10.1`` works the same as
+    ``reconninja scan 10.10.10.1``.
     """
 
     def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple[str | None, click.Command | None, list[str]]:
@@ -79,7 +79,7 @@ class ReconNinjaGroup(TyperGroup):
 
         # If first arg starts with '-', it's a flag — route to scan
         # If first arg looks like a target (IP, hostname, CIDR), route to scan
-        # This handles: recon-ninja 10.10.10.1, recon-ninja --fast 10.10.10.1
+        # This handles: reconninja 10.10.10.1, reconninja --fast 10.10.10.1
         return super().resolve_command(ctx, ["scan"] + args)
 
 
@@ -88,7 +88,7 @@ class ReconNinjaGroup(TyperGroup):
 # ---------------------------------------------------------------------------
 
 app = typer.Typer(
-    name="recon-ninja",
+    name="reconninja",
     help="🥷 Automated reconnaissance tool for CTFs and pentesting",
     add_completion=False,
     rich_markup_mode="rich",
@@ -101,9 +101,9 @@ def _main(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", "-V", help="Show version"),
 ) -> None:
-    """🥷 Recon Ninja v2 — Automated reconnaissance for CTFs and pentesting."""
+    """🥷 ReconNinja v2 — Automated reconnaissance for CTFs and pentesting."""
     if version:
-        console.print(f"recon-ninja v{__version__}")
+        console.print(f"reconninja v{__version__}")
         raise typer.Exit()
 
 console = Console()
@@ -113,20 +113,19 @@ err_console = Console(stderr=True)
 # Banner
 # ---------------------------------------------------------------------------
 
-_BANNER = r"""
-[bold cyan]
-   ____  ____  _   _ _____ ____  ____   ___  ____ _____
-  |  _ \|  _ \| \ | |_   _|  _ \| __ ) / _ \/ ___|_   _|
-  | |_) | | | |  \| | | | | |_) |  _ \| | | \___ \ | |
-  |  _ <| |_| | |\  | | | |  _ <| |_) | |_| |___) || |
-  |_| \_\____/|_| \_| |_| |_| \_\____/ \___/|____/ |_|
-[/bold cyan]
-[dim]v{version} — Automated recon for CTFs & pentesting[/dim]
-"""
+_BANNER = (
+    "[bold bright_cyan]"
+    "  ╭──────────────────────────────────────────╮\n"
+    "  │           R E C O N N I N J A            │\n"
+    "  │               v{version}                    │\n"
+    "  │   Automated recon for CTFs & pentesting  │\n"
+    "  ╰──────────────────────────────────────────╯"
+    "[/bold bright_cyan]"
+)
 
 
 def _print_banner() -> None:
-    """Display the Recon Ninja banner."""
+    """Display the ReconNinja banner."""
     console.print(_BANNER.format(version=__version__))
 
 
@@ -359,7 +358,7 @@ def _display_summary(state: ScanState) -> None:
         f"Hostnames: [cyan]{', '.join(state.hostnames) or 'none'}[/cyan]\n"
         f"Box profile: [yellow]{state.box_profile}[/yellow]\n"
         f"Findings: [bold]{len(state.all_findings)}[/bold]",
-        title="[bold green]🥷 Recon Ninja[/bold green]",
+        title="[bold green]🥷 ReconNinja[/bold green]",
         border_style="green",
     ))
 
@@ -428,26 +427,26 @@ def scan_cmd(
 ) -> None:
     """🥷 Run a reconnaissance scan against a target.
 
-    Usage: recon-ninja <target>  OR  recon-ninja scan <target>
+    Usage: reconninja <target>  OR  reconninja scan <target>
     """
 
     # ------------------------------------------------------------------
     # 1. Version
     # ------------------------------------------------------------------
     if version:
-        console.print(f"recon-ninja v{__version__}")
+        console.print(f"reconninja v{__version__}")
         raise typer.Exit()
 
     # ------------------------------------------------------------------
     # 2. No target → help
     # ------------------------------------------------------------------
     if target is None:
-        console.print("Usage: recon-ninja <target> [OPTIONS]")
-        console.print("       recon-ninja scan <target> [OPTIONS]")
-        console.print("       recon-ninja check-tools")
-        console.print("       recon-ninja install")
+        console.print("Usage: reconninja <target> [OPTIONS]")
+        console.print("       reconninja scan <target> [OPTIONS]")
+        console.print("       reconninja check-tools")
+        console.print("       reconninja install")
         console.print()
-        console.print("Run [bold]recon-ninja --help[/] for full options.")
+        console.print("Run [bold]reconninja --help[/] for full options.")
         raise typer.Exit()
 
     # ------------------------------------------------------------------
@@ -499,8 +498,8 @@ def scan_cmd(
     if missing_required and not quiet:
         err_console.print(
             f"[yellow]⚠ Missing required tools:[/yellow] {', '.join(missing_required)}\n"
-            f"[dim]Run 'recon-ninja install' to install them, "
-            f"or 'recon-ninja check-tools' for details.[/dim]"
+            f"[dim]Run 'reconninja install' to install them, "
+            f"or 'reconninja check-tools' for details.[/dim]"
         )
 
     # 3f. SecLists check
@@ -657,7 +656,7 @@ def check_tools_cmd(
 ) -> None:
     """🔍 Check which external tools are installed and show versions.
 
-    Scans for all 30+ external tools that Recon Ninja uses, detects
+    Scans for all 30+ external tools that ReconNinja uses, detects
     their versions, and displays a detailed status report.
     """
     _print_banner()
@@ -677,7 +676,7 @@ def install_cmd(
     optional_only: bool = typer.Option(False, "--optional", help="Install only optional tools"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show detailed output"),
 ) -> None:
-    """📦 Auto-install all tools that Recon Ninja needs.
+    """📦 Auto-install all tools that ReconNinja needs.
 
     Detects your OS and package manager, then installs tools using:
       - System package manager (apt/dnf/pacman)

@@ -1,4 +1,4 @@
-"""FTP reconnaissance module for Recon Ninja v2.
+"""FTP reconnaissance module for ReconNinja v2.
 
 Triggered when port 21 is open or the service is identified as ``ftp``.
 Checks for anonymous login, banner information, FTP bounce attacks,

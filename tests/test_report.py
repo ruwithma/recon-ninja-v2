@@ -140,12 +140,12 @@ class TestGenerateReports:
     # --- Markdown content ------------------------------------------------
 
     async def test_markdown_has_headers(self, tmp_path: Path) -> None:
-        """Markdown contains # Recon Ninja and ## sections."""
+        """Markdown contains # ReconNinja and ## sections."""
         state = make_sample_state(output_dir=tmp_path)
         paths = await generate_reports(state, tmp_path, html=False, json_output=False)
 
         content = paths["markdown"].read_text(encoding="utf-8")
-        assert "Recon Ninja" in content
+        assert "ReconNinja" in content
         assert "## Target Information" in content
         assert "## Open Ports" in content
 

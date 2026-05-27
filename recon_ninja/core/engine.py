@@ -1,4 +1,4 @@
-"""Main async orchestrator for Recon Ninja.
+"""Main async orchestrator for ReconNinja.
 
 Runs all reconnaissance phases in order, supports resume from checkpoint,
 and manages concurrent module execution with graceful error handling.
@@ -153,8 +153,8 @@ class ReconEngine:
     # ------------------------------------------------------------------
 
     def _setup_file_logger(self) -> None:
-        """Attach a FileHandler writing to ``<output_dir>/recon-ninja.log``."""
-        log_path = self.output_dir / "recon-ninja.log"
+        """Attach a FileHandler writing to ``<output_dir>/reconninja.log``."""
+        log_path = self.output_dir / "reconninja.log"
         handler = logging.FileHandler(str(log_path), encoding="utf-8")
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
@@ -746,7 +746,7 @@ class ReconEngine:
     def _build_markdown_report(self) -> list[str]:
         """Build a Markdown report as a list of lines."""
         lines: list[str] = [
-            f"# Recon Ninja — Scan Report",
+            f"# ReconNinja — Scan Report",
             f"",
             f"**Target:** {self.target}",
             f"**Box Profile:** {self.state.box_profile}",

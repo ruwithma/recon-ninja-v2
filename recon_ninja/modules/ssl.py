@@ -1,4 +1,4 @@
-"""SSL/TLS security auditing module for Recon Ninja v2.
+"""SSL/TLS security auditing module for ReconNinja v2.
 
 Triggered when any HTTPS service is detected, or when ports 443/8443 are open.
 Runs multiple TLS analysis tools, parses certificate details for hostname

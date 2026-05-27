@@ -1,4 +1,4 @@
-"""Kerberos reconnaissance module for Recon Ninja v2.
+"""Kerberos reconnaissance module for ReconNinja v2.
 
 Triggered when port 88 (Kerberos) is detected open.  Enumerates valid
 usernames via ``kerbrute`` and nmap's ``krb5-enum-users`` NSE script,

@@ -1,4 +1,4 @@
-"""WinRM reconnaissance module for Recon Ninja v2.
+"""WinRM reconnaissance module for ReconNinja v2.
 
 Triggered when ports 5985 (WinRM HTTP) or 5986 (WinRM HTTPS) are
 detected open.  Enumerates the WinRM service and authentication

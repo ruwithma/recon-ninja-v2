@@ -1,4 +1,4 @@
-"""Async subprocess execution wrapper for Recon Ninja.
+"""Async subprocess execution wrapper for ReconNinja.
 
 This is the fundamental building block for ALL tool execution.
 Provides run_tool, run_tool_streaming, and run_multiple for

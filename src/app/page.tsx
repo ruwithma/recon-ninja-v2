@@ -43,14 +43,14 @@ const BOX_PROFILES = [
 ]
 
 const QUICK_COMMANDS = [
-  { cmd: 'recon-ninja 10.10.11.58', desc: 'Standard scan' },
-  { cmd: 'recon-ninja 10.10.11.58 --htb --add-hosts', desc: 'HackTheBox mode' },
-  { cmd: 'recon-ninja 10.10.11.58 --fast', desc: 'Fast scan (top-1000 ports)' },
-  { cmd: 'recon-ninja 10.10.11.58 --full', desc: 'Full scan with all modules' },
-  { cmd: 'recon-ninja 10.10.11.58 --resume', desc: 'Resume interrupted scan' },
-  { cmd: 'recon-ninja check-tools', desc: 'Check installed tools' },
-  { cmd: 'recon-ninja install', desc: 'Auto-install all tools' },
-  { cmd: 'recon-ninja install --required', desc: 'Install only required tools' },
+  { cmd: 'reconninja 10.10.11.58', desc: 'Standard scan' },
+  { cmd: 'reconninja 10.10.11.58 --htb --add-hosts', desc: 'HackTheBox mode' },
+  { cmd: 'reconninja 10.10.11.58 --fast', desc: 'Fast scan (top-1000 ports)' },
+  { cmd: 'reconninja 10.10.11.58 --full', desc: 'Full scan with all modules' },
+  { cmd: 'reconninja 10.10.11.58 --resume', desc: 'Resume interrupted scan' },
+  { cmd: 'reconninja check-tools', desc: 'Check installed tools' },
+  { cmd: 'reconninja install', desc: 'Auto-install all tools' },
+  { cmd: 'reconninja install --required', desc: 'Install only required tools' },
 ]
 
 export default function Home() {
@@ -65,7 +65,7 @@ export default function Home() {
             <div className="text-4xl">🥷</div>
             <div>
               <h1 className="text-3xl font-bold tracking-tight" style={{ color: '#00f0ff' }}>
-                RECON NINJA
+                RECONNINJA
                 <span className="text-sm font-normal ml-2 px-2 py-0.5 rounded" style={{ background: '#00f0ff20', color: '#00f0ff' }}>v2.0.0</span>
               </h1>
               <p className="text-sm mt-1" style={{ color: '#8892a4' }}>
@@ -264,7 +264,7 @@ export default function Home() {
             Built for CTF warriors. Sharpened for pentesters.
           </span>
           <span className="text-xs" style={{ color: '#6b7280' }}>
-            🥷 Recon Ninja v2.0.0
+            🥷 ReconNinja v2.0.0
           </span>
         </div>
       </footer>

@@ -1,4 +1,4 @@
-"""Regex-based loot extractor for Recon Ninja v2.
+"""Regex-based loot extractor for ReconNinja v2.
 
 After all modules complete, scan ALL raw output files in the results
 directory and extract structured loot (usernames, hashes, emails,

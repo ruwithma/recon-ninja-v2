@@ -1,4 +1,4 @@
-"""Pure ``xml.etree`` Nmap XML parser for Recon Ninja v2.
+"""Pure ``xml.etree`` Nmap XML parser for ReconNinja v2.
 
 Parses Nmap XML output **without** depending on the ``python-nmap``
 library.  Also provides helpers for RustScan text output and Nmap

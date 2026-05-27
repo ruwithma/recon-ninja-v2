@@ -17,7 +17,7 @@
 
 ---
 
-Recon Ninja v2 is a fully automated reconnaissance pipeline for CTF competitions
+ReconNinja v2 is a fully automated reconnaissance pipeline for CTF competitions
 (HackTheBox, TryHackMe, OSCP) and authorized pentesting engagements. It runs
 the right tools in the right order, branches on what it finds, surfaces
 findings with suggested next steps, and generates polished reports --- all from
@@ -65,25 +65,25 @@ pip install -e .
 chmod +x install.sh && sudo ./install.sh
 
 # Run your first scan
-recon-ninja 10.10.11.58
+reconninja 10.10.11.58
 
 # HackTheBox machine with auto /etc/hosts
-recon-ninja 10.10.11.58 --htb --add-hosts
+reconninja 10.10.11.58 --htb --add-hosts
 
 # Fast scan (port scan + basic service enum only)
-recon-ninja 10.10.11.58 --fast
+reconninja 10.10.11.58 --fast
 
 # Full scan with all optional modules enabled
-recon-ninja 10.10.11.58 --full
+reconninja 10.10.11.58 --full
 
 # Resume an interrupted scan
-recon-ninja 10.10.11.58 --resume
+reconninja 10.10.11.58 --resume
 
 # Check which tools are installed
-recon-ninja check-tools
+reconninja check-tools
 
 # Install missing tools automatically
-sudo recon-ninja install
+sudo reconninja install
 ```
 
 ---
@@ -96,7 +96,7 @@ sudo recon-ninja install
 pip install -e .
 ```
 
-This installs the `recon-ninja` CLI and Python dependencies. External security
+This installs the `reconninja` CLI and Python dependencies. External security
 tools (nmap, nikto, etc.) must be installed separately.
 
 ### Option 2: One-shot shell script
@@ -121,10 +121,10 @@ The shell script installs everything end-to-end:
 
 ```bash
 # Install all tools (required + optional)
-sudo recon-ninja install
+sudo reconninja install
 
 # Install only required tools
-sudo recon-ninja install --required
+sudo reconninja install --required
 ```
 
 The built-in installer supports 6 install methods:
@@ -134,9 +134,9 @@ Already-installed tools are detected and skipped automatically.
 ### Verify your setup
 
 ```bash
-recon-ninja check-tools          # Summary view
-recon-ninja check-tools -v       # Detailed view with paths and versions
-recon-ninja --version            # Print version
+reconninja check-tools          # Summary view
+reconninja check-tools -v       # Detailed view with paths and versions
+reconninja --version            # Print version
 ```
 
 ---
@@ -145,15 +145,15 @@ recon-ninja --version            # Print version
 
 | Command | Description |
 |---------|-------------|
-| `recon-ninja <target>` | Run a scan against a target (shorthand) |
-| `recon-ninja scan <target> [OPTIONS]` | Run a scan (explicit subcommand) |
-| `recon-ninja check-tools` | Check which external tools are installed with versions |
-| `recon-ninja install` | Auto-install all tools |
-| `recon-ninja install --required` | Install only required tools |
-| `recon-ninja --version` / `-V` | Show version |
+| `reconninja <target>` | Run a scan against a target (shorthand) |
+| `reconninja scan <target> [OPTIONS]` | Run a scan (explicit subcommand) |
+| `reconninja check-tools` | Check which external tools are installed with versions |
+| `reconninja install` | Auto-install all tools |
+| `reconninja install --required` | Install only required tools |
+| `reconninja --version` / `-V` | Show version |
 
-The shorthand `recon-ninja <target>` is equivalent to
-`recon-ninja scan <target>`. If the first positional argument does not match a
+The shorthand `reconninja <target>` is equivalent to
+`reconninja scan <target>`. If the first positional argument does not match a
 known subcommand, it is automatically routed to the `scan` command.
 
 ---
@@ -161,7 +161,7 @@ known subcommand, it is automatically routed to the `scan` command.
 ## Scan Flags
 
 ```
-recon-ninja <TARGET> [OPTIONS]
+reconninja <TARGET> [OPTIONS]
 ```
 
 ### Scan Control
@@ -194,7 +194,7 @@ recon-ninja <TARGET> [OPTIONS]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-o, --output DIR` | `./results/<target>/` | Output directory |
-| `--config FILE` | `~/.config/recon-ninja/config.yaml` | Config file path |
+| `--config FILE` | `~/.config/reconninja/config.yaml` | Config file path |
 | `--wordlist FILE` | SecLists raft-medium-directories | Custom wordlist for directory fuzzing |
 | `--html` | off | Generate styled HTML report |
 | `--json` / `--no-json` | on | Generate machine-readable JSON findings file |
@@ -228,7 +228,7 @@ recon-ninja <TARGET> [OPTIONS]
 
 ## Execution Pipeline
 
-Recon Ninja executes a 7-phase pipeline. Each phase is checkpointed so
+ReconNinja executes a 7-phase pipeline. Each phase is checkpointed so
 interrupted scans can be resumed with `--resume`.
 
 | Phase | Name | What Happens | Key Tools |
@@ -293,7 +293,7 @@ Phases 1-2. Modules whose required tools are missing are gracefully skipped.
 
 ## Box Profile Classification
 
-After Phase 2, Recon Ninja automatically classifies the target into a box
+After Phase 2, ReconNinja automatically classifies the target into a box
 profile based on detected services. This classification is stored in the scan
 state and displayed in the final summary.
 
@@ -310,7 +310,7 @@ state and displayed in the final summary.
 
 ## Configuration
 
-Recon Ninja uses a 3-layer config merge with increasing priority:
+ReconNinja uses a 3-layer config merge with increasing priority:
 
 ```
 Built-in defaults  <  YAML config file  <  CLI flags
@@ -319,7 +319,7 @@ Built-in defaults  <  YAML config file  <  CLI flags
 ### Default config location
 
 ```
-~/.config/recon-ninja/config.yaml
+~/.config/reconninja/config.yaml
 ```
 
 ### Example configuration
@@ -363,7 +363,7 @@ api_keys:
 
 ### SecLists support
 
-Recon Ninja automatically detects SecLists at `/usr/share/seclists` and uses
+ReconNinja automatically detects SecLists at `/usr/share/seclists` and uses
 the following wordlists by default:
 
 - **Directory fuzzing:** `raft-medium-directories.txt` (or `common.txt` for `--fast`)
@@ -385,7 +385,7 @@ results/10.10.11.58_20250527_1430/
 ├── 00_SUMMARY.md              # Full markdown report
 ├── 00_SUMMARY.html            # Styled HTML report (with --html)
 ├── 00_findings.json           # Machine-readable JSON findings
-├── recon-ninja.log            # Debug log
+├── reconninja.log            # Debug log
 ├── scan.state                 # Checkpoint file for --resume
 ├── state.json                 # Raw state dump
 ├── ports.txt                  # Comma-separated open port list
@@ -421,7 +421,7 @@ Scan state is saved after every phase. If a scan is interrupted (Ctrl+C,
 timeout, crash), resume it:
 
 ```bash
-recon-ninja 10.10.11.58 --resume
+reconninja 10.10.11.58 --resume
 ```
 
 Completed phases are skipped, and the scan continues from the last
@@ -481,7 +481,7 @@ recon_ninja/
 
 ## External Tools
 
-Recon Ninja integrates with 30 external security tools. Required tools must
+ReconNinja integrates with 30 external security tools. Required tools must
 be present for a full scan; optional tools are gracefully skipped when missing.
 
 ### Required (8)
@@ -565,122 +565,122 @@ pip install -e ".[dev]"
 
 ```bash
 # Standard scan against an IP
-recon-ninja 10.10.10.1
+reconninja 10.10.10.1
 
 # Scan a domain target
-recon-ninja example.com
+reconninja example.com
 
 # Scan with custom output directory
-recon-ninja 10.10.10.1 -o /tmp/scan-results
+reconninja 10.10.10.1 -o /tmp/scan-results
 
 # Scan with verbose output (raw tool output + debug log)
-recon-ninja 10.10.10.1 -v
+reconninja 10.10.10.1 -v
 ```
 
 ### Speed profiles
 
 ```bash
 # Fast scan: top-1000 ports, basic service enum only
-recon-ninja 10.10.10.1 --fast
+reconninja 10.10.10.1 --fast
 
 # Full scan: all modules including nuclei, amass, theHarvester, testssl
-recon-ninja 10.10.10.1 --full
+reconninja 10.10.10.1 --full
 
 # Stealth: low-rate scanning to avoid IDS detection
-recon-ninja 10.10.10.1 --stealth
+reconninja 10.10.10.1 --stealth
 
 # Aggressive: include potentially disruptive checks
-recon-ninja 10.10.10.1 --aggressive
+reconninja 10.10.10.1 --aggressive
 ```
 
 ### Targeted scans
 
 ```bash
 # Web-only enumeration
-recon-ninja dog.htb --only-web
+reconninja dog.htb --only-web
 
 # Port scan + service enum only (no modules, no vuln, no OSINT)
-recon-ninja 10.10.10.1 --only-ports
+reconninja 10.10.10.1 --only-ports
 
 # Skip specific modules
-recon-ninja 10.10.10.1 --no-web --no-smb
+reconninja 10.10.10.1 --no-web --no-smb
 
 # Scan specific ports
-recon-ninja 10.10.10.1 --ports 22,80,443,8080
+reconninja 10.10.10.1 --ports 22,80,443,8080
 
 # Skip vulnerability scanning
-recon-ninja 10.10.10.1 --no-vuln
+reconninja 10.10.10.1 --no-vuln
 ```
 
 ### CTF workflows
 
 ```bash
 # HackTheBox machine (VPN check + auto /etc/hosts)
-recon-ninja 10.10.11.58 --htb --add-hosts
+reconninja 10.10.11.58 --htb --add-hosts
 
 # HTB with domain name
-recon-ninja 10.10.11.58 --htb --domain corp.local --add-hosts
+reconninja 10.10.11.58 --htb --domain corp.local --add-hosts
 
 # TryHackMe machine
-recon-ninja 10.10.10.1 --platform thm
+reconninja 10.10.10.1 --platform thm
 
 # OSCP exam target
-recon-ninja 10.10.10.1 --platform oscp --full
+reconninja 10.10.10.1 --platform oscp --full
 
 # Scan with credentials
-recon-ninja 10.10.10.1 --creds admin:password123 --domain corp.local
+reconninja 10.10.10.1 --creds admin:password123 --domain corp.local
 ```
 
 ### Network options
 
 ```bash
 # Enable UDP scanning (requires root)
-sudo recon-ninja 10.10.10.1 --udp
+sudo reconninja 10.10.10.1 --udp
 
 # Custom nmap rate and timeout
-recon-ninja 10.10.10.1 --rate 10000 --timeout 600
+reconninja 10.10.10.1 --rate 10000 --timeout 600
 
 # Limit concurrent modules
-recon-ninja 10.10.10.1 -t 5
+reconninja 10.10.10.1 -t 5
 
 # Route through a proxy (Burp Suite, etc.)
-recon-ninja 10.10.10.1 --proxy http://127.0.0.1:8080
+reconninja 10.10.10.1 --proxy http://127.0.0.1:8080
 ```
 
 ### Resume and recovery
 
 ```bash
 # Resume an interrupted scan
-recon-ninja 10.10.10.1 --resume
+reconninja 10.10.10.1 --resume
 
 # Skip VPN check on resume
-recon-ninja 10.10.10.1 --resume --no-vpn-check
+reconninja 10.10.10.1 --resume --no-vpn-check
 ```
 
 ### Output and reporting
 
 ```bash
 # Generate HTML report
-recon-ninja 10.10.10.1 --html
+reconninja 10.10.10.1 --html
 
 # Disable JSON output
-recon-ninja 10.10.10.1 --no-json
+reconninja 10.10.10.1 --no-json
 
 # Custom wordlist for directory fuzzing
-recon-ninja 10.10.10.1 --wordlist /path/to/custom-wordlist.txt
+reconninja 10.10.10.1 --wordlist /path/to/custom-wordlist.txt
 
 # Custom config file
-recon-ninja 10.10.10.1 --config /path/to/my-config.yaml
+reconninja 10.10.10.1 --config /path/to/my-config.yaml
 
 # Quiet mode (summary only)
-recon-ninja 10.10.10.1 -q
+reconninja 10.10.10.1 -q
 ```
 
 ---
 
 ## Legal Disclaimer
 
-**Recon Ninja is designed exclusively for authorized security testing.**
+**ReconNinja is designed exclusively for authorized security testing.**
 
 Use only on machines and networks you own or have explicit written permission
 to test. Unauthorized scanning is illegal under the Computer Fraud and Abuse

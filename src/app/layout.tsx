@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Recon Ninja v2 — Automated Recon for CTFs & Pentesting",
+  title: "ReconNinja v2 — Automated Recon for CTFs & Pentesting",
   description: "Fully automated reconnaissance pipeline for CTF competitions and authorized pentesting. 7-phase async pipeline, 18 service modules, 30+ external tools.",
 };
 

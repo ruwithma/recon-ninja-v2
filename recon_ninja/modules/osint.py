@@ -1,4 +1,4 @@
-"""OSINT (Open-Source Intelligence) module for Recon Ninja v2.
+"""OSINT (Open-Source Intelligence) module for ReconNinja v2.
 
 Gathers passive intelligence about a domain target using multiple
 open-source sources. Discovers subdomains, WHOIS registration data,

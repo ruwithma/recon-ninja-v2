@@ -1,4 +1,4 @@
-"""Rich terminal UI for Recon Ninja v2.
+"""Rich terminal UI for ReconNinja v2.
 
 Provides beautiful, real-time terminal output during and after scanning.
 Uses the ``rich`` library for panels, tables, progress bars, and live displays.
@@ -108,7 +108,7 @@ def _service_style(service: str) -> str:
 
 
 def display_banner(target: str, interface: str, is_root: bool, tool_count: int) -> None:
-    """Display the Recon Ninja startup banner with target info.
+    """Display the ReconNinja startup banner with target info.
 
     Parameters
     ----------
@@ -126,7 +126,7 @@ def display_banner(target: str, interface: str, is_root: bool, tool_count: int) 
     root_status = "[bold green]✓[/] root" if is_root else "[bold red]✗[/] non-root"
 
     content = Text.from_markup(
-        "🥷 [bold bright_green]Recon Ninja v2[/]\n\n"
+        "🥷 [bold bright_green]ReconNinja v2[/]\n\n"
         f"  [bold]Target[/]    {target}\n"
         f"  [bold]Interface[/] {interface}\n"
         f"  [bold]Privilege[/] {root_status}\n"
@@ -137,7 +137,7 @@ def display_banner(target: str, interface: str, is_root: bool, tool_count: int) 
         Align.center(content),
         border_style="bold green",
         padding=(1, 4),
-        title="[bold green]🥷 Recon Ninja[/]",
+        title="[bold green]🥷 ReconNinja[/]",
         title_align="center",
     )
     console.print(panel)

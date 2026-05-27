@@ -1,4 +1,4 @@
-"""DNS reconnaissance module for Recon Ninja v2.
+"""DNS reconnaissance module for ReconNinja v2.
 
 Triggered when port 53 is open or the service is identified as ``domain``
 (DNS).  Attempts zone transfers, brute-forces subdomains, and enumerates

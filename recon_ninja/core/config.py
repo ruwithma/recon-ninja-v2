@@ -1,7 +1,7 @@
-"""Configuration loader for Recon Ninja v2.
+"""Configuration loader for ReconNinja v2.
 
 Handles loading, merging, and persisting user configuration from
-``~/.config/recon-ninja/config.yaml``.  The merge order is:
+``~/.config/reconninja/config.yaml``.  The merge order is:
 
     built-in defaults  <  YAML file  <  CLI overrides
 
@@ -164,7 +164,7 @@ class MergeConfig:
     Resolution order (later wins):
 
     1. **defaults** — hard-coded in :data:`_DEFAULT_CONFIG`.
-    2. **file**     — ``~/.config/recon-ninja/config.yaml``.
+    2. **file**     — ``~/.config/reconninja/config.yaml``.
     3. **cli**      — flags passed on the command-line.
     """
 
@@ -260,7 +260,7 @@ def _write_defaults(path: Path) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CONFIG_PATH = Path.home() / ".config" / "recon-ninja" / "config.yaml"
+_DEFAULT_CONFIG_PATH = Path.home() / ".config" / "reconninja" / "config.yaml"
 
 # Module-level singleton holder (simple, import-safe)
 _instance: MergeConfig | None = None
@@ -276,7 +276,7 @@ def load_config(
     ----------
     config_path:
         Path to the YAML config file.  Defaults to
-        ``~/.config/recon-ninja/config.yaml``.  If the file does not exist
+        ``~/.config/reconninja/config.yaml``.  If the file does not exist
         it is created from defaults silently.
     cli_overrides:
         Flat or nested dictionary of CLI flag overrides.  Nested dicts

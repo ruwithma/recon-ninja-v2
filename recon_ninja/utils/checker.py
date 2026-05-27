@@ -1,4 +1,4 @@
-"""Enhanced tool availability checker for Recon Ninja v2.
+"""Enhanced tool availability checker for ReconNinja v2.
 
 Uses multiple strategies to detect external security tools:
   1. ``shutil.which()`` — standard PATH lookup
@@ -601,7 +601,7 @@ def format_detailed_status(tools: list[ToolInfo]) -> None:
         f"[bold]Required:[/] [green]{required_found}/{required_total}[/] found  "
         f"[bold]Optional:[/] [green]{optional_found}/{optional_total}[/] found  "
         f"[bold]Total:[/] [bold cyan]{total_found}/{total_tools}[/] available",
-        title="[bold]🥷 Recon Ninja — Tool Inventory[/]",
+        title="[bold]🥷 ReconNinja — Tool Inventory[/]",
         border_style="cyan",
     ))
 
@@ -623,7 +623,7 @@ def format_detailed_status(tools: list[ToolInfo]) -> None:
             names = ", ".join(t.name for t in missing_optional)
             parts.append(f"[yellow]Missing optional:[/] {names}")
         console.print(Panel(
-            "\n".join(parts) + "\n\n[dim]Run [bold]recon-ninja install[/] to install missing tools.[/]",
+            "\n".join(parts) + "\n\n[dim]Run [bold]reconninja install[/] to install missing tools.[/]",
             title="[bold yellow]⚠ Missing Tools[/]",
             border_style="yellow",
         ))

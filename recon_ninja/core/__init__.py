@@ -1,1 +1,1 @@
-"""Core engine, models, and configuration for Recon Ninja."""
+"""Core engine, models, and configuration for ReconNinja."""

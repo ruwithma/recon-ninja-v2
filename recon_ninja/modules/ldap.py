@@ -1,4 +1,4 @@
-"""LDAP reconnaissance module for Recon Ninja v2.
+"""LDAP reconnaissance module for ReconNinja v2.
 
 Triggered when ports 389 (LDAP) or 636 (LDAPS) are detected open.
 Enumerates the LDAP directory service via nmap NSE scripts, anonymous

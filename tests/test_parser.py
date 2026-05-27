@@ -42,7 +42,7 @@ NMAP_XML_SAMPLE = """\
       <port protocol="tcp" portid="80">
         <state state="open" reason="syn-ack" reason_ttl="63"/>
         <service name="http" product="Apache httpd" version="2.4.52" extrainfo="" method="probed" conf="10"/>
-        <script id="http-title" output="Recon Ninja Dashboard"/>
+        <script id="http-title" output="ReconNinja Dashboard"/>
       </port>
       <port protocol="tcp" portid="443">
         <state state="open" reason="syn-ack" reason_ttl="63"/>
@@ -103,7 +103,7 @@ class TestParseNmapXml:
 
     def test_http_title_hostname(self, xml_file: Path) -> None:
         _, hostnames = parse_nmap_xml(xml_file)
-        assert "Recon Ninja Dashboard" in hostnames
+        assert "ReconNinja Dashboard" in hostnames
 
     def test_hostname_element(self, xml_file: Path) -> None:
         _, hostnames = parse_nmap_xml(xml_file)

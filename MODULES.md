@@ -1,4 +1,4 @@
-# Recon Ninja v2 — Service Module Reference
+# ReconNinja v2 — Service Module Reference
 
 This document covers all 18 service modules, their external tool dependencies,
 trigger conditions, findings, and the shared async interface they implement.
@@ -951,7 +951,7 @@ which modules use it, and whether it is required or optional.
 
 ### Minimum Viable Toolset
 
-Recon Ninja can run with just `nmap` and `curl` installed — every other tool
+ReconNinja can run with just `nmap` and `curl` installed — every other tool
 is checked at runtime and skipped gracefully if absent. However, for
 comprehensive results on a typical engagement, the recommended minimum is:
 

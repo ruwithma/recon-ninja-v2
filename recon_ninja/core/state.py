@@ -1,4 +1,4 @@
-"""State / checkpoint manager for Recon Ninja v2.
+"""State / checkpoint manager for ReconNinja v2.
 
 Serialises the :class:`~recon_ninja.core.models.ScanState` to disk after
 every completed phase so that a scan can be resumed with ``--resume``.

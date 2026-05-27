@@ -1,4 +1,4 @@
-"""/etc/hosts read/write helper for Recon Ninja v2.
+"""/etc/hosts read/write helper for ReconNinja v2.
 
 Provides functions to read, search, and append entries to ``/etc/hosts``.
 All write operations are **sudo-aware** — they use ``sudo tee -a`` to

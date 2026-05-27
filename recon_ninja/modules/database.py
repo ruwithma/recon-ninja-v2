@@ -1,4 +1,4 @@
-"""Database reconnaissance module for Recon Ninja v2.
+"""Database reconnaissance module for ReconNinja v2.
 
 Triggered when well-known database ports are detected open.  Supports
 MySQL, MSSQL, PostgreSQL, Redis, MongoDB, and Oracle — each with

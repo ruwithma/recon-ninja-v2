@@ -1,6 +1,6 @@
-# Installation Guide — Recon Ninja v2
+# Installation Guide — ReconNinja v2
 
-Complete guide to installing Recon Ninja v2 and its 30 external security tools.
+Complete guide to installing ReconNinja v2 and its 30 external security tools.
 Covers four installation methods, the built-in installer, tool inventory, and troubleshooting.
 
 ---
@@ -29,7 +29,7 @@ Covers four installation methods, the built-in installer, tool inventory, and tr
 
 | Requirement | Minimum Version | Notes |
 |---|---|---|
-| **Python** | 3.10+ | Required to run Recon Ninja itself |
+| **Python** | 3.10+ | Required to run ReconNinja itself |
 | **pip** | Latest | Python package installer |
 | **git** | Any | For cloning Git-based tools |
 | **sudo / root** | — | Needed for system package installs and `/opt` writes |
@@ -46,12 +46,12 @@ Optional runtimes (auto-installed by the built-in installer if missing):
 
 ### 2.1 Quick Install — pip
 
-The fastest way to get Recon Ninja itself installed and the `recon-ninja` command on your PATH:
+The fastest way to get ReconNinja itself installed and the `reconninja` command on your PATH:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/recon-ninja.git
-cd recon-ninja
+git clone https://github.com/your-org/reconninja.git
+cd reconninja
 
 # Install in editable mode (recommended for development)
 pip install -e .
@@ -60,15 +60,15 @@ pip install -e .
 pip install .
 ```
 
-This installs the Python package and its dependencies (`rich`, `typer`, `click`, `requests`, `pyyaml`, `jinja2`, `aiofiles`), and creates the `recon-ninja` CLI entry point.
+This installs the Python package and its dependencies (`rich`, `typer`, `click`, `requests`, `pyyaml`, `jinja2`, `aiofiles`), and creates the `reconninja` CLI entry point.
 
-> **Note:** This only installs the Python package — it does **not** install the 30 external security tools. After this step, run `recon-ninja install` to get the tools, or use one of the other methods below.
+> **Note:** This only installs the Python package — it does **not** install the 30 external security tools. After this step, run `reconninja install` to get the tools, or use one of the other methods below.
 
 Verify the installation:
 
 ```bash
-recon-ninja --version
-# recon-ninja v2.0.0
+reconninja --version
+# reconninja v2.0.0
 ```
 
 On systems with PEP 668 enforcement (Ubuntu 23.04+, Debian 12+), use `--break-system-packages` or a virtual environment:
@@ -103,7 +103,7 @@ sudo ./install.sh
 5. **Installs Go** — via package manager, snap, or binary download (v1.22.0 fallback)
 6. **Installs Go-based tools** — ffuf, nuclei, subfinder, httpx, kerbrute, gowitness, amass, windapsearch-go
 7. **Installs Python tools** — theHarvester, crackmapexec, ssh-audit, enum4linux-ng, smbmap, droopescan
-8. **Installs Recon Ninja** — `pip install -e .`
+8. **Installs ReconNinja** — `pip install -e .`
 9. **Installs WPScan** — via `gem install wpscan`
 10. **Installs SecLists** — via package manager or `git clone` to `/usr/share/seclists`
 11. **Clones Git-based tools** — testssl.sh and joomscan to `/opt/recon-tools/`
@@ -115,14 +115,14 @@ The script is **idempotent** — already-installed tools are detected and skippe
 
 ### 2.3 Built-in Installer
 
-Recon Ninja includes a Python-based installer accessible via the CLI. This is the recommended method after the initial `pip install -e .`.
+ReconNinja includes a Python-based installer accessible via the CLI. This is the recommended method after the initial `pip install -e .`.
 
 ```bash
 # Install ALL tools (required + optional)
-sudo recon-ninja install
+sudo reconninja install
 
 # Install only the 8 required tools
-sudo recon-ninja install --required
+sudo reconninja install --required
 ```
 
 **Supported install methods (6):**
@@ -163,7 +163,7 @@ If you run without `sudo`, the installer warns you and continues with what it ca
 
 If you prefer full control, install each component manually.
 
-#### Step 1: Install Recon Ninja
+#### Step 1: Install ReconNinja
 
 ```bash
 pip install -e .
@@ -287,11 +287,11 @@ source ~/.bashrc   # or: source ~/.zshrc
 
 ## 3. External Tools Reference
 
-Recon Ninja integrates **30 external security tools**. Each is detected at runtime — missing required tools produce a warning; missing optional tools cause the corresponding module to be gracefully skipped.
+ReconNinja integrates **30 external security tools**. Each is detected at runtime — missing required tools produce a warning; missing optional tools cause the corresponding module to be gracefully skipped.
 
 ### 3.1 Required Tools (8)
 
-These tools are essential for Recon Ninja's core functionality. If any are missing, you will be warned before a scan starts.
+These tools are essential for ReconNinja's core functionality. If any are missing, you will be warned before a scan starts.
 
 | Tool | Package Name | Install Method | Version Flag | Description |
 |---|---|---|---|---|
@@ -308,7 +308,7 @@ These tools are essential for Recon Ninja's core functionality. If any are missi
 
 ### 3.2 Optional Tools (22)
 
-Optional tools extend Recon Ninja's capabilities. If missing, the corresponding module is skipped with a notice.
+Optional tools extend ReconNinja's capabilities. If missing, the corresponding module is skipped with a notice.
 
 #### Go-based Tools (8)
 
@@ -389,7 +389,7 @@ Optional tools extend Recon Ninja's capabilities. If missing, the corresponding 
 Use the `check-tools` command to see which tools are installed, their versions, paths, and install hints for missing tools:
 
 ```bash
-recon-ninja check-tools
+reconninja check-tools
 ```
 
 **Output includes:**
@@ -403,7 +403,7 @@ recon-ninja check-tools
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  🥷 Recon Ninja — Tool Inventory                                 │
+│  🥷 ReconNinja — Tool Inventory                                 │
 │  Required: 8/8 found  Optional: 18/22 found  Total: 26/30       │
 └──────────────────────────────────────────────────────────────────┘
 
@@ -478,7 +478,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## 7. SecLists Wordlists
 
-Recon Ninja uses the [SecLists](https://github.com/danielmiessler/SecLists) collection for directory fuzzing, DNS enumeration, and other wordlist-based attacks.
+ReconNinja uses the [SecLists](https://github.com/danielmiessler/SecLists) collection for directory fuzzing, DNS enumeration, and other wordlist-based attacks.
 
 **Installation locations (checked in order):**
 
@@ -501,7 +501,7 @@ sudo apt install seclists
 sudo git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/seclists
 ```
 
-Recon Ninja's wordlist resolver (`recon_ninja.utils.wordlists`) automatically locates the SecLists directory and resolves paths for common wordlists (directory brute-forcing, DNS, vhosts, etc.).
+ReconNinja's wordlist resolver (`recon_ninja.utils.wordlists`) automatically locates the SecLists directory and resolves paths for common wordlists (directory brute-forcing, DNS, vhosts, etc.).
 
 ---
 
@@ -557,7 +557,7 @@ sudo dnf install -y ruby-devel # Fedora
 sudo pacman -S --noconfirm ruby # Arch
 ```
 
-### Tools installed but `recon-ninja check-tools` doesn't detect them
+### Tools installed but `reconninja check-tools` doesn't detect them
 
 **Symptom:** A tool is installed but shows as missing in the check-tools output.
 
@@ -566,9 +566,9 @@ sudo pacman -S --noconfirm ruby # Arch
 1. Verify the tool is on your PATH: `which <tool>`
 2. If it's in `~/go/bin/` or `~/.local/bin/`, ensure those directories are in your PATH
 3. Reload your shell: `source ~/.bashrc`
-4. Run `recon-ninja check-tools` again
+4. Run `reconninja check-tools` again
 
-### `recon-ninja install` skips system packages
+### `reconninja install` skips system packages
 
 **Symptom:** Tools like `nmap` show as skipped with "No system package manager detected."
 
@@ -606,4 +606,4 @@ sudo apt install seclists
 
 ---
 
-*For more information, see the [README.md](README.md) or run `recon-ninja --help`.*
+*For more information, see the [README.md](README.md) or run `reconninja --help`.*

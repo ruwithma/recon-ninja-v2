@@ -1,4 +1,4 @@
-"""SNMP reconnaissance module for Recon Ninja v2.
+"""SNMP reconnaissance module for ReconNinja v2.
 
 Triggered when UDP port 161 is detected.  Brute-forces community
 strings, performs full MIB walks on valid communities, and extracts

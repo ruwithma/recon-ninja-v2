@@ -1,4 +1,4 @@
-"""Vulnerability correlation module for Recon Ninja v2.
+"""Vulnerability correlation module for ReconNinja v2.
 
 Correlates discovered services with known vulnerabilities using
 searchsploit and nuclei, and enriches CVE findings with severity

@@ -1,4 +1,4 @@
-"""Utility modules for Recon Ninja."""
+"""Utility modules for ReconNinja."""
 
 from recon_ninja.utils.checker import (
     REQUIRED_TOOLS,

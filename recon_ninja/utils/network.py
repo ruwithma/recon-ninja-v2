@@ -1,4 +1,4 @@
-"""Network utility functions for Recon Ninja v2.
+"""Network utility functions for ReconNinja v2.
 
 Provides target validation, VPN interface detection, privilege checks,
 private-IP classification, and CIDR expansion.

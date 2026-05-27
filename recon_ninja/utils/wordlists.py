@@ -1,4 +1,4 @@
-"""SecLists wordlist path resolver for Recon Ninja v2.
+"""SecLists wordlist path resolver for ReconNinja v2.
 
 Resolves wordlist files by searching a user-supplied custom directory
 first, then falling back to the standard SecLists installation path.

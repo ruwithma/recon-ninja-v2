@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Recon Ninja v2 — Dependency Installer
+# ReconNinja v2 — Dependency Installer
 # =============================================================================
 # One-shot script that installs ALL required tools and dependencies.
 # Supports: apt (Debian/Ubuntu/Kali), dnf (Fedora/RHEL), pacman (Arch)
@@ -9,9 +9,9 @@
 #   chmod +x install.sh && sudo ./install.sh
 #
 # Alternatively, use the built-in Python installer:
-#   sudo recon-ninja install          # Install all tools
-#   sudo recon-ninja install --required  # Install only required tools
-#   recon-ninja check-tools           # Check what's installed
+#   sudo reconninja install          # Install all tools
+#   sudo reconninja install --required  # Install only required tools
+#   reconninja check-tools           # Check what's installed
 # =============================================================================
 
 set -euo pipefail
@@ -281,13 +281,13 @@ for tool in "${PYTHON_TOOLS[@]}"; do
 done
 
 # Install the project itself (editable mode)
-info "Installing recon-ninja in editable mode ..."
+info "Installing reconninja in editable mode ..."
 if pip install -e . --break-system-packages 2>/dev/null; then
-    ok "recon-ninja installed (editable)"
-    INSTALLED+=("recon-ninja (pip -e)")
+    ok "reconninja installed (editable)"
+    INSTALLED+=("reconninja (pip -e)")
 else
-    fail "recon-ninja pip install failed"
-    REQUIRED_MISSING+=("recon-ninja")
+    fail "reconninja pip install failed"
+    REQUIRED_MISSING+=("reconninja")
 fi
 
 # ---------------------------------------------------------------------------
@@ -392,7 +392,7 @@ configure_shell_rc() {
     if [[ -f "$rc_file" ]]; then
         if ! rg -qF "$GO_BIN" "$rc_file" 2>/dev/null; then
             echo "" >> "$rc_file"
-            echo "# Added by Recon Ninja installer" >> "$rc_file"
+            echo "# Added by ReconNinja installer" >> "$rc_file"
             echo "$PATH_LINE" >> "$rc_file"
             ok "Added ~/go/bin to ${rc_file}"
         else
@@ -409,7 +409,7 @@ if [[ -f "$HOME/.cargo/env" ]]; then
     for rc_file in "$HOME/.bashrc" "$HOME/.zshrc"; do
         if [[ -f "$rc_file" ]] && ! rg -qF ".cargo/env" "$rc_file" 2>/dev/null; then
             echo '' >> "$rc_file"
-            echo '# Added by Recon Ninja installer' >> "$rc_file"
+            echo '# Added by ReconNinja installer' >> "$rc_file"
             echo 'source "$HOME/.cargo/env"' >> "$rc_file"
             ok "Added cargo env to ${rc_file}"
         fi
@@ -445,7 +445,7 @@ fi
 echo ""
 if [[ ${#REQUIRED_MISSING[@]} -eq 0 ]]; then
     ok "All required dependencies installed successfully!"
-    info "Run 'source ~/.bashrc' (or ~/.zshrc) to update your PATH, then: recon-ninja --help"
+    info "Run 'source ~/.bashrc' (or ~/.zshrc) to update your PATH, then: reconninja --help"
 else
     fail "Some required dependencies failed. Please install them manually."
     exit 1

@@ -1,7 +1,7 @@
 ---
 Task ID: 1
 Agent: main
-Task: Add auto-installer and enhanced tool detection to Recon Ninja v2
+Task: Add auto-installer and enhanced tool detection to ReconNinja v2
 
 Work Log:
 - Reviewed existing checker.py (shutil.which only, no version/path detection)
@@ -17,7 +17,7 @@ Work Log:
 - Updated utils/__init__.py with proper exports
 - All 310 tests pass
 - All 21 module imports verified
-- CLI commands tested: recon-ninja --version, recon-ninja check-tools, recon-ninja install --required, recon-ninja scan --help
+- CLI commands tested: reconninja --version, reconninja check-tools, reconninja install --required, reconninja scan --help
 
 Stage Summary:
 - Enhanced tool detection: 30 tools tracked with version, path, install method, alt names
@@ -25,8 +25,8 @@ Stage Summary:
 - Version detection works (runs --version and parses output)
 - Alternative binary names (e.g. enum4linux vs enum4linux-ng)
 - Extra search paths (~/go/bin, ~/.local/bin, /usr/local/bin, /opt)
-- New CLI: `recon-ninja check-tools` shows detailed table with versions and paths
-- New CLI: `recon-ninja install [--required|--optional]` auto-installs all tools
-- New CLI: `recon-ninja <target>` still works (auto-routes to scan command)
+- New CLI: `reconninja check-tools` shows detailed table with versions and paths
+- New CLI: `reconninja install [--required|--optional]` auto-installs all tools
+- New CLI: `reconninja <target>` still works (auto-routes to scan command)
 - Installer handles: apt, dnf, pacman, go install, pip install, cargo install, gem install, git clone
 - Installer includes: Go/Rust prerequisite installation, SecLists installation, PATH configuration

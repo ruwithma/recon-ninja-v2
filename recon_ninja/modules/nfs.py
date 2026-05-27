@@ -1,4 +1,4 @@
-"""NFS reconnaissance module for Recon Ninja v2.
+"""NFS reconnaissance module for ReconNinja v2.
 
 Triggered when port 2049 (NFS) is detected open.  Enumerates exported
 NFS shares via ``showmount -e`` and nmap NSE scripts, then suggests

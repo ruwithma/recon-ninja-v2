@@ -1,4 +1,4 @@
-"""RPC reconnaissance module for Recon Ninja v2.
+"""RPC reconnaissance module for ReconNinja v2.
 
 Triggered when ports 111 (rpcbind) or 135 (MSRPC) are detected open.
 Performs null-session enumeration with ``rpcclient``, queries registered

@@ -1,4 +1,4 @@
-"""Auto-installer for Recon Ninja v2 external tools.
+"""Auto-installer for ReconNinja v2 external tools.
 
 Detects the host OS and package manager, then installs all (or a subset of)
 required security tools using the appropriate method:
@@ -574,7 +574,7 @@ class ToolInstaller:
         # ── Banner ──────────────────────────────────────────────────────
         self.console.print()
         self.console.print(Panel(
-            "[bold]🥷 Recon Ninja v2 — Tool Installer[/]\n\n"
+            "[bold]🥷 ReconNinja v2 — Tool Installer[/]\n\n"
             f"  Package manager: [cyan]{self.pkg_mgr or 'not detected'}[/]\n"
             f"  Running as root: [cyan]{'yes' if is_root() else 'no'}[/]\n"
             f"  Include optional: [cyan]{'yes' if include_optional else 'no'}[/]",
@@ -649,7 +649,7 @@ class ToolInstaller:
             for add_dir in path_additions:
                 if add_dir not in content:
                     with open(rc_file, "a", encoding="utf-8") as f:
-                        f.write(f'\n# Added by Recon Ninja installer\nexport PATH="{add_dir}:$PATH"\n')
+                        f.write(f'\n# Added by ReconNinja installer\nexport PATH="{add_dir}:$PATH"\n')
                     modified = True
 
             if modified:
@@ -669,7 +669,7 @@ class ToolInstaller:
                     continue
                 if ".cargo/env" not in content:
                     with open(rc_file, "a", encoding="utf-8") as f:
-                        f.write('\n# Added by Recon Ninja installer\nsource "$HOME/.cargo/env"\n')
+                        f.write('\n# Added by ReconNinja installer\nsource "$HOME/.cargo/env"\n')
                     self.console.print(f"  [green]✔[/] Added cargo env to {rc_file}")
 
     def print_summary(self, results: list[InstallResult] | None = None) -> None:
@@ -708,7 +708,7 @@ class ToolInstaller:
             )
             self.console.print(
                 "[dim]Run 'source ~/.bashrc' (or ~/.zshrc) to update your PATH, "
-                "then: recon-ninja check-tools[/]"
+                "then: reconninja check-tools[/]""
             )
 
 

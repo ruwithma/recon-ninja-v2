@@ -1,4 +1,4 @@
-"""VNC reconnaissance module for Recon Ninja v2.
+"""VNC reconnaissance module for ReconNinja v2.
 
 Triggered when ports 5900–5910 (VNC) are detected open.  Uses nmap's
 ``vnc-info`` NSE script to determine the authentication type and VNC

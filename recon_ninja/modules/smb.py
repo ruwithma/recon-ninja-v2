@@ -1,4 +1,4 @@
-"""SMB reconnaissance module for Recon Ninja v2.
+"""SMB reconnaissance module for ReconNinja v2.
 
 Triggered when ports 139 or 445 are open, or when the service is
 identified as ``netbios-ssn`` / ``microsoft-ds``.  Enumerates shares,

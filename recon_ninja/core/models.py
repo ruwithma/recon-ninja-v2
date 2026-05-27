@@ -1,4 +1,4 @@
-"""Data models for Recon Ninja — all core dataclasses used throughout the application."""
+"""Data models for ReconNinja — all core dataclasses used throughout the application."""
 
 from __future__ import annotations
 
