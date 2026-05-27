@@ -1,2 +1,0 @@
-[console_scripts]
-recon-ninja = recon_ninja.main:app
