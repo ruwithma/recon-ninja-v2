@@ -579,17 +579,19 @@ async def run_vuln_correlate_module(
     if cve_findings:
         logger.info("Enriching %d CVE findings via NVD API", len(cve_findings))
         for f in cve_findings:
-            nvd_severity = _lookup_nvd_severity(f.cve, api_key=nvd_api_key)
-            if nvd_severity is not None:
-                # Upgrade severity if NVD says it's worse than our initial guess
-                if nvd_severity.rank < f.severity.rank:
-                    logger.debug(
-                        "Upgrading %s severity: %s → %s (NVD)",
-                        f.cve,
-                        f.severity.value,
-                        nvd_severity.value,
-                    )
-                    f.severity = nvd_severity
+            cve_id = f.cve
+            if cve_id is not None:
+                nvd_severity = _lookup_nvd_severity(cve_id, api_key=nvd_api_key)
+                if nvd_severity is not None:
+                    # Upgrade severity if NVD says it's worse than our initial guess
+                    if nvd_severity.rank < f.severity.rank:
+                        logger.debug(
+                            "Upgrading %s severity: %s → %s (NVD)",
+                            cve_id,
+                            f.severity.value,
+                            nvd_severity.value,
+                        )
+                        f.severity = nvd_severity
 
     # Save enriched results
     results_file = vuln_output_dir / "vuln_findings.json"

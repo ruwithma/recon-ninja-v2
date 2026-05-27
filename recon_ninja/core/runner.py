@@ -196,6 +196,10 @@ async def run_tool_streaming(
     collected_lines: list[str] = []
     timed_out = False
 
+    if proc.stdout is None:
+        logger.error("Subprocess stdout stream is None")
+        return
+
     try:
         while True:
             try:

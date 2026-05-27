@@ -90,21 +90,24 @@ class TestValidateTarget:
         ok, result = validate_target("   ")
         assert ok is False
 
-    def test_validate_hostname_google(self) -> None:
+    @patch("recon_ninja.utils.network.socket.gethostbyname")
+    def test_validate_hostname_google(self, mock_gethostbyname: MagicMock) -> None:
         """'google.com' should resolve — (True, some_ip)."""
+        mock_gethostbyname.return_value = "8.8.8.8"
         ok, result = validate_target("google.com")
         assert ok is True
-        # Result should be an IP address
-        parts = result.split(".")
-        assert len(parts) == 4
+        assert result == "8.8.8.8"
 
     def test_validate_hostname_invalid(self) -> None:
         """'!!!invalid' is not a valid hostname and should fail."""
         ok, result = validate_target("!!!invalid")
         assert ok is False
 
-    def test_validate_hostname_unresolvable(self) -> None:
+    @patch("recon_ninja.utils.network.socket.gethostbyname")
+    def test_validate_hostname_unresolvable(self, mock_gethostbyname: MagicMock) -> None:
         """A well-formed but non-existent hostname should fail."""
+        import socket
+        mock_gethostbyname.side_effect = socket.gaierror
         ok, result = validate_target("this.domain.does.not.exist.at.all.xyz12345.com")
         assert ok is False
 

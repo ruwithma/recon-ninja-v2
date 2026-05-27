@@ -143,3 +143,21 @@ Stage Summary:
 - Install command: `pip install python-Wappalyzer` or `pip install reconninja[wappalyzer]`
 - Works without Wappalyzer (graceful fallback to custom rules)
 - Files modified: web_tech.py, pyproject.toml, checker.py
+
+---
+Task ID: 5
+Agent: main
+Task: Fix DNS Mocking in tests, implement Dynamic Ports across all modules, and add Non-Root Fallbacks
+
+Work Log:
+- Identified that test execution was hanging on DNS resolution because unit tests for validate_target in test_utils.py were executing live DNS requests. Mocked socket.gethostbyname in test_validate_hostname_google and test_validate_hostname_unresolvable.
+- Enhanced kerberos.py, ldap.py, nfs.py, rdp.py, rpc.py, and smb.py to support non-standard ports by implementing service checks and dynamic port resolution in state, and updating all CLI command construction (nmap, smbclient, smbmap, crackmapexec, ldapsearch) to pass the correct resolved port.
+- Updated relevance module filters in engine.py::_filter_relevant_modules to schedule modules based on service names (e.g., has_service("ldap"), has_service("smb")) in addition to standard default ports.
+- Fixed nmap execution failure for non-root users by dynamically falling back to TCP Connect scan (-sT) instead of SYN scan (-sS) in _nmap_fast_scan, and dynamically omitting OS detection (-O) in phase2_deep_scan.
+- Verified all 311 unit tests and mypy type checks pass successfully.
+
+Stage Summary:
+- DNS Mocking: Fixed unit test hang so that tests complete in ~2.8s instead of blocking.
+- Dynamic Ports: Added support for non-standard ports in Kerberos, LDAP, NFS, RDP, RPC, and SMB modules.
+- Non-Root Fallback: Fixed permission errors on nmap port/service scans when running as non-root.
+- Verified clean passes on pytest, mypy, and live fast scan against localhost.

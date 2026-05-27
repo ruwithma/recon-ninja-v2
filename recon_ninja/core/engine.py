@@ -30,6 +30,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_multiple, run_tool
+from recon_ninja.utils.network import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -319,12 +320,13 @@ class ReconEngine:
             console.print(f"  [green]✓[/] Found [bold]{len(self.state.open_ports)}[/] open ports: [cyan]{', '.join(str(p) for p in self.state.open_ports)}[/]")
 
     async def _nmap_fast_scan(self) -> None:
-        """Fast SYN scan using nmap as fallback."""
+        """Fast SYN/TCP Connect scan using nmap as fallback."""
         top_ports = "1000" if self.config.fast_mode else "10000"
+        scan_type = "-sS" if is_root() else "-sT"
         cmd = [
             "nmap",
             "-Pn",
-            "-sS",
+            scan_type,
             "--top-ports", top_ports,
             "-T4",
             *self.config.extra_nmap_flags,
@@ -389,12 +391,16 @@ class ReconEngine:
         cmd = [
             "nmap",
             "-Pn",
-            "-sC", "-sV", "-O",
+        ]
+        if is_root():
+            cmd.append("-O")
+        cmd.extend([
+            "-sC", "-sV",
             "-p", ports_str,
             "-oX", str(xml_out),
             *self.config.extra_nmap_flags,
             self.target,
-        ]
+        ])
 
         rc, stdout, stderr = await run_tool(
             cmd,
@@ -684,7 +690,7 @@ class ReconEngine:
 
         if not self.quiet:
             console = get_console()
-            for name, (_cmd_list, _outfile) in commands:
+            for name, _cmd_list, _outfile in commands:
                 console.print(f"  [dim]▸[/] Running [bold]{name}[/]...")
 
         results = await run_multiple(
@@ -1111,8 +1117,8 @@ class ReconEngine:
             if "web" in module_name_to_func:
                 relevant.append(("web", module_name_to_func["web"]))
 
-        # SMB: port 139 or 445
-        if has_port(139, 445):
+        # SMB: port 139 or 445, or SMB services
+        if has_port(139, 445) or has_service("microsoft-ds") or has_service("netbios-ssn") or has_service("smb"):
             if "smb" in module_name_to_func:
                 relevant.append(("smb", module_name_to_func["smb"]))
 
@@ -1121,63 +1127,71 @@ class ReconEngine:
             if "ssh" in module_name_to_func:
                 relevant.append(("ssh", module_name_to_func["ssh"]))
 
-        # FTP: port 21
-        if has_port(21):
+        # FTP: port 21 or service "ftp"
+        if has_port(21) or has_service("ftp"):
             if "ftp" in module_name_to_func:
                 relevant.append(("ftp", module_name_to_func["ftp"]))
 
-        # SMTP: ports 25, 465, 587
-        if has_port(25, 465, 587):
+        # SMTP: ports 25, 465, 587, or service "smtp"
+        if has_port(25, 465, 587) or has_service("smtp") or has_service("ssmtp"):
             if "smtp" in module_name_to_func:
                 relevant.append(("smtp", module_name_to_func["smtp"]))
 
-        # SNMP: UDP port 161
-        if 161 in set(self.state.udp_ports):
+        # SNMP: UDP port 161, or service "snmp"
+        if (161 in set(self.state.udp_ports)) or has_service("snmp"):
             if "snmp" in module_name_to_func:
                 relevant.append(("snmp", module_name_to_func["snmp"]))
 
-        # DNS: port 53
-        if has_port(53):
+        # DNS: port 53 or service "dns"
+        if has_port(53) or has_service("dns") or has_service("domain"):
             if "dns" in module_name_to_func:
                 relevant.append(("dns", module_name_to_func["dns"]))
 
-        # LDAP: ports 389, 636
-        if has_port(389, 636):
+        # LDAP: ports 389, 636, or service "ldap"
+        if has_port(389, 636) or has_service("ldap"):
             if "ldap" in module_name_to_func:
                 relevant.append(("ldap", module_name_to_func["ldap"]))
 
-        # Kerberos: port 88
-        if has_port(88):
+        # Kerberos: port 88 or service "kerberos"
+        if has_port(88) or has_service("kerberos") or has_service("kdc"):
             if "kerberos" in module_name_to_func:
                 relevant.append(("kerberos", module_name_to_func["kerberos"]))
 
-        # RPC: ports 111 or 135
-        if has_port(111, 135):
+        # RPC: ports 111 or 135, or service matching RPC
+        if has_port(111, 135) or has_service("rpcbind") or has_service("portmapper") or has_service("msrpc") or has_service("rpc"):
             if "rpc" in module_name_to_func:
                 relevant.append(("rpc", module_name_to_func["rpc"]))
 
-        # NFS: port 2049
-        if has_port(2049):
+        # NFS: port 2049 or service "nfs"
+        if has_port(2049) or has_service("nfs"):
             if "nfs" in module_name_to_func:
                 relevant.append(("nfs", module_name_to_func["nfs"]))
 
-        # RDP: port 3389
-        if has_port(3389):
+        # RDP: port 3389 or service "rdp"
+        if has_port(3389) or has_service("rdp") or has_service("ms-wbt-server"):
             if "rdp" in module_name_to_func:
                 relevant.append(("rdp", module_name_to_func["rdp"]))
 
-        # VNC: ports 5900-5910
-        if port_set.intersection(range(5900, 5911)):
+        # VNC: ports 5900-5910, or service "vnc"
+        if port_set.intersection(range(5900, 5911)) or has_service("vnc"):
             if "vnc" in module_name_to_func:
                 relevant.append(("vnc", module_name_to_func["vnc"]))
 
-        # WinRM: ports 5985, 5986
-        if has_port(5985, 5986):
+        # WinRM: ports 5985, 5986, or service "winrm"
+        if has_port(5985, 5986) or has_service("winrm") or has_service("wsman"):
             if "winrm" in module_name_to_func:
                 relevant.append(("winrm", module_name_to_func["winrm"]))
 
-        # Database: ports 3306, 1433, 5432, 6379, 27017, 1521
-        if has_port(3306, 1433, 5432, 6379, 27017, 1521):
+        # Database: ports 3306, 1433, 5432, 6379, 27017, 1521, or DB services
+        if (
+            has_port(3306, 1433, 5432, 6379, 27017, 1521)
+            or has_service("mysql")
+            or has_service("mssql")
+            or has_service("postgresql")
+            or has_service("redis")
+            or has_service("mongodb")
+            or has_service("oracle")
+        ):
             if "database" in module_name_to_func:
                 relevant.append(("database", module_name_to_func["database"]))
 

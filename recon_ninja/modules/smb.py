@@ -29,8 +29,25 @@ MODULE_NAME = "smb"
 
 
 def _is_smb_port(state: ScanState) -> bool:
-    """Return ``True`` if any SMB-related port (139, 445) is open."""
-    return any(p in state.open_ports for p in (139, 445))
+    """Return ``True`` if any SMB-related port (139, 445) is open or service is SMB."""
+    if any(p in state.open_ports for p in (139, 445)):
+        return True
+    for _port, svc in state.services.items():
+        if any(name in svc.service.lower() for name in ("microsoft-ds", "netbios-ssn", "smb")):
+            return True
+    return False
+
+
+def _get_smb_port(state: ScanState) -> int:
+    """Return the open SMB port, preferring 445, then 139, then others."""
+    if 445 in state.open_ports:
+        return 445
+    if 139 in state.open_ports:
+        return 139
+    for port, svc in state.services.items():
+        if any(name in svc.service.lower() for name in ("microsoft-ds", "netbios-ssn", "smb")):
+            return port
+    return 445
 
 
 @module_guard()
@@ -59,8 +76,10 @@ async def run_smb_module(
         return ModuleResult(
             module_name=MODULE_NAME,
             status="skipped",
-            error_message="No SMB ports (139/445) found open.",
+            error_message="No SMB ports (139/445) or SMB services found open.",
         )
+
+    smb_port = _get_smb_port(state)
 
     # Prepare output subdirectory
     smb_dir = output_dir / "smb"
@@ -100,7 +119,7 @@ async def run_smb_module(
                         description="The SMB server allows anonymous (null session) access.",
                         module=MODULE_NAME,
                         evidence=_extract_line(stdout, "Anonymous"),
-                        suggested_commands=[f"smbclient -L //{target}/ -N"],
+                        suggested_commands=[f"smbclient -L //{target}/ -N -p {smb_port}"],
                     )
                 )
 
@@ -112,7 +131,7 @@ async def run_smb_module(
                         description="The SMB server allows guest access without authentication.",
                         module=MODULE_NAME,
                         evidence=_extract_line(stdout, "Guest"),
-                        suggested_commands=[f"smbclient -L //{target}/ -U 'guest%'"],
+                        suggested_commands=[f"smbclient -L //{target}/ -U 'guest%' -p {smb_port}"],
                     )
                 )
 
@@ -143,7 +162,7 @@ async def run_smb_module(
     if shutil.which("smbclient"):
         logger.info("[%s] Running smbclient share listing against %s", MODULE_NAME, target)
         smb_out = smb_dir / "smbclient_shares.txt"
-        cmd = ["smbclient", "-L", f"//{target}/", "-N"]
+        cmd = ["smbclient", "-L", f"//{target}/", "-N", "-p", str(smb_port)]
         rc, stdout, stderr = await run_tool(
             cmd, output_file=smb_out, timeout=timeout
         )
@@ -160,7 +179,7 @@ async def run_smb_module(
                         module=MODULE_NAME,
                         evidence="\n".join(shares),
                         suggested_commands=[
-                            f"smbclient //{target}/{s} -N" for s in shares
+                            f"smbclient //{target}/{s} -N -p {smb_port}" for s in shares
                         ],
                     )
                 )
@@ -175,7 +194,7 @@ async def run_smb_module(
         smbmap_out = smb_dir / "smbmap.txt"
 
         # Null session
-        cmd = ["smbmap", "-H", target, "-u", "", "-p", ""]
+        cmd = ["smbmap", "-H", target, "-u", "", "-p", "", "-P", str(smb_port)]
         rc, stdout, stderr = await run_tool(
             cmd, output_file=smbmap_out, timeout=timeout
         )
@@ -189,7 +208,7 @@ async def run_smb_module(
 
         # Retry with guest if null session found nothing
         if not readable_shares and not writable_shares:
-            cmd_guest = ["smbmap", "-H", target, "-u", "guest", "-p", ""]
+            cmd_guest = ["smbmap", "-H", target, "-u", "guest", "-p", "", "-P", str(smb_port)]
             rc2, stdout2, stderr2 = await run_tool(
                 cmd_guest, timeout=timeout
             )
@@ -206,7 +225,7 @@ async def run_smb_module(
                     module=MODULE_NAME,
                     evidence="\n".join(writable_shares),
                     suggested_commands=[
-                        f"smbclient //{target}/{s} -N" for s in writable_shares
+                        f"smbclient //{target}/{s} -N -p {smb_port}" for s in writable_shares
                     ],
                 )
             )
@@ -220,7 +239,7 @@ async def run_smb_module(
                     module=MODULE_NAME,
                     evidence="\n".join(readable_shares),
                     suggested_commands=[
-                        f"smbclient //{target}/{s} -N" for s in readable_shares
+                        f"smbclient //{target}/{s} -N -p {smb_port}" for s in readable_shares
                     ],
                 )
             )
@@ -235,7 +254,7 @@ async def run_smb_module(
         nmap_vuln_out = smb_dir / "nmap_smb_vulns.txt"
         cmd = [
             "nmap",
-            "-p445",
+            f"-p{smb_port}",
             "--script", "smb-vuln-ms17-010,smb-vuln-cve-2020-0796",
             target,
         ]
@@ -281,7 +300,7 @@ async def run_smb_module(
     if shutil.which("crackmapexec"):
         logger.info("[%s] Running crackmapexec smb against %s", MODULE_NAME, target)
         cme_out = smb_dir / "crackmapexec.txt"
-        cmd = ["crackmapexec", "smb", target, "-u", "", "-p", ""]
+        cmd = ["crackmapexec", "smb", target, "-u", "", "-p", "", "--port", str(smb_port)]
         rc, stdout, stderr = await run_tool(
             cmd, output_file=cme_out, timeout=timeout
         )

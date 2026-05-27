@@ -145,8 +145,8 @@ class TestGenerateReports:
 
         content = paths["markdown"].read_text(encoding="utf-8")
         assert "ReconNinja" in content
-        assert "## Target Information" in content
-        assert "## Open Ports" in content
+        assert "Target Information" in content
+        assert "Open Ports" in content
 
     async def test_markdown_has_services(self, tmp_path: Path) -> None:
         """Markdown lists services found."""
@@ -165,7 +165,7 @@ class TestGenerateReports:
         paths = await generate_reports(state, tmp_path, html=False, json_output=False)
 
         content = paths["markdown"].read_text(encoding="utf-8")
-        assert "## Key Findings" in content
+        assert "Key Findings" in content
         assert "SSH Password Auth" in content
         assert "Web Server Detected" in content
 

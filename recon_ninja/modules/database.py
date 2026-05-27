@@ -119,11 +119,11 @@ async def _enum_mysql(
                         f"any credentials and access all databases."
                     ),
                     module=MODULE_NAME,
-                    evidence=re.search(
-                        r"mysql-empty-password:.*?(?:\n\n|\Z)", stdout, re.DOTALL
-                    )
-                    .group(0)
-                    .strip()[:2000],
+                    evidence=(
+                        m.group(0).strip()[:2000]
+                        if (m := re.search(r"mysql-empty-password:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                        else stdout[:2000]
+                    ),
                     suggested_commands=[
                         f"mysql -h {target} -P {port} -u root -p''",
                         f"mysqldump -h {target} -P {port} -u root --all-databases",
@@ -251,11 +251,11 @@ async def _enum_mssql(
                         f"OS-level access via xp_cmdshell."
                     ),
                     module=MODULE_NAME,
-                    evidence=re.search(
-                        r"ms-sql-empty-password:.*?(?:\n\n|\Z)", stdout, re.DOTALL
-                    )
-                    .group(0)
-                    .strip()[:2000],
+                    evidence=(
+                        m.group(0).strip()[:2000]
+                        if (m := re.search(r"ms-sql-empty-password:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                        else stdout[:2000]
+                    ),
                     suggested_commands=[
                         f"mssqlclient.py sa@{target} -port {port}",
                         f"sqsh -S {target} -U sa -P ''",
@@ -617,11 +617,11 @@ async def _enum_mongodb(
                     f"all data."
                 ),
                 module=MODULE_NAME,
-                evidence=re.search(
-                    r"mongodb-info:.*?(?:\n\n|\Z)", stdout, re.DOTALL
-                )
-                .group(0)
-                .strip()[:2000],
+                evidence=(
+                    m.group(0).strip()[:2000]
+                    if (m := re.search(r"mongodb-info:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                    else stdout[:2000]
+                ),
                 suggested_commands=[
                     f"mongosh --host {target} --port {port}",
                     f"mongo --host {target} --port {port}",
@@ -744,7 +744,8 @@ async def _enum_oracle(
 
 # ── Database type → enum function mapping ───────────────────────────────
 
-_DB_ENUM_FUNCS: dict[str, object] = {
+from typing import Callable, Any
+_DB_ENUM_FUNCS: dict[str, Callable[..., Any]] = {
     "mysql": _enum_mysql,
     "mssql": _enum_mssql,
     "postgresql": _enum_postgresql,
@@ -815,7 +816,7 @@ async def run_database_module(
             continue
 
         try:
-            await enum_func(  # type: ignore[misc]
+            await enum_func(
                 target=target,
                 port=port,
                 config=config,

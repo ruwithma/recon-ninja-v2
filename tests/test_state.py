@@ -131,7 +131,7 @@ class TestLoadState:
         state_file.write_text(json.dumps({"wrong": "data"}), encoding="utf-8")
         # This may or may not return None depending on how ScanState.from_dict handles it,
         # but it should not crash
-        result = initialised_mgr.load_state()
+        initialised_mgr.load_state()
         # Either None or a partial ScanState — just verify no exception
 
     def test_load_state_preserves_completed_modules(self, initialised_mgr: StateManager) -> None:

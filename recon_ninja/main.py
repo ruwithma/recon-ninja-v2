@@ -61,24 +61,24 @@ class ReconNinjaGroup(TyperGroup):
     ``reconninja scan 10.10.10.1``.
     """
 
-    def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple[str | None, click.Command | None, list[str]]:
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple[str | None, click.Command | None, list[str]]:  # type: ignore[override]
         """Override command resolution to default to 'scan'."""
         # If there are no args, just show help
         if not args:
-            return super().resolve_command(ctx, args)
+            return super().resolve_command(ctx, args)  # type: ignore[arg-type, return-value]
 
         # Known subcommands
         cmd_name = args[0]
-        known_commands = set(self.list_commands(ctx))
+        known_commands = set(self.list_commands(ctx))  # type: ignore[arg-type]
 
         # If the first arg matches a known command, use it normally
         if cmd_name in known_commands:
-            return super().resolve_command(ctx, args)
+            return super().resolve_command(ctx, args)  # type: ignore[arg-type, return-value]
 
         # If first arg starts with '-', it's a flag — route to scan
         # If first arg looks like a target (IP, hostname, CIDR), route to scan
         # This handles: reconninja 10.10.10.1, reconninja --fast 10.10.10.1
-        return super().resolve_command(ctx, ["scan"] + args)
+        return super().resolve_command(ctx, ["scan"] + args)  # type: ignore[arg-type, return-value]
 
 
 # ---------------------------------------------------------------------------

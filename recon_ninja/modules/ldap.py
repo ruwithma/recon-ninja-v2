@@ -89,6 +89,40 @@ def _extract_entries(ldap_output: str) -> dict[str, list[str]]:
     return {"users": users, "groups": groups}
 
 
+def _is_ldap_port(state: ScanState) -> bool:
+    """Return ``True`` if port 389 or 636 is open, or the service is LDAP."""
+    if any(p in state.open_ports for p in (389, 636)):
+        return True
+    for _port, svc in state.services.items():
+        if "ldap" in svc.service.lower():
+            return True
+    return False
+
+
+def _get_ldap_port(state: ScanState) -> int:
+    """Return the open LDAP port, preferring 389, then 636, then others."""
+    if 389 in state.open_ports:
+        return 389
+    if 636 in state.open_ports:
+        return 636
+    for port, svc in state.services.items():
+        if "ldap" in svc.service.lower():
+            return port
+    return 389
+
+
+def _get_ldap_url(target: str, port: int, state: ScanState) -> str:
+    """Construct appropriate ldap:// or ldaps:// URL for the target and port."""
+    scheme = "ldap"
+    if port == 636:
+        scheme = "ldaps"
+    else:
+        svc = state.services.get(port)
+        if svc and "ldaps" in svc.service.lower():
+            scheme = "ldaps"
+    return f"{scheme}://{target}:{port}"
+
+
 @module_guard()
 async def run_ldap_module(
     target: str,
@@ -98,7 +132,7 @@ async def run_ldap_module(
 ) -> ModuleResult:
     """Run LDAP enumeration against *target*.
 
-    Triggered when port 389 (LDAP) or 636 (LDAPS) is open.
+    Triggered when port 389 (LDAP) or 636 (LDAPS) is open, or service is LDAP.
 
     Parameters
     ----------
@@ -122,21 +156,22 @@ async def run_ldap_module(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Check trigger ports ──────────────────────────────────────────────
-    open_ports = set(state.open_ports)
-    ldap_ports = {389, 636}
-    if not ldap_ports.intersection(open_ports):
+    if not _is_ldap_port(state):
         return ModuleResult(
             module_name=MODULE_NAME,
             status="skipped",
             duration_seconds=time.monotonic() - start,
-            error_message="No LDAP ports (389/636) found open",
+            error_message="No LDAP ports (389/636) or LDAP service found open",
         )
+
+    ldap_port = _get_ldap_port(state)
+    ldap_url = _get_ldap_url(target, ldap_port, state)
 
     # ── 1. Nmap LDAP NSE scripts ────────────────────────────────────────
     if shutil.which("nmap"):
         nmap_out = output_dir / "ldap_nmap.txt"
         rc, stdout, stderr = await run_tool(
-            cmd=["nmap", "-p389", "--script", "ldap-rootdse,ldap-search", target],
+            cmd=["nmap", f"-p{ldap_port}", "--script", "ldap-rootdse,ldap-search", target],
             output_file=nmap_out,
             timeout=config.default_timeout,
         )
@@ -181,7 +216,7 @@ async def run_ldap_module(
             cmd=[
                 "ldapsearch",
                 "-x",
-                "-H", f"ldap://{target}",
+                "-H", ldap_url,
                 "-b", "",
                 "-s", "base",
                 "namingContexts",
@@ -205,7 +240,7 @@ async def run_ldap_module(
                     module=MODULE_NAME,
                     evidence=stdout[:2000],
                     suggested_commands=[
-                        f"ldapsearch -x -H ldap://{target} -b '' -s base namingContexts",
+                        f"ldapsearch -x -H {ldap_url} -b '' -s base namingContexts",
                     ],
                 )
             )
@@ -229,7 +264,7 @@ async def run_ldap_module(
                 cmd=[
                     "ldapsearch",
                     "-x",
-                    "-H", f"ldap://{target}",
+                    "-H", ldap_url,
                     "-b", base_dn,
                     "(objectClass=*)",
                 ],
@@ -253,7 +288,7 @@ async def run_ldap_module(
                             module=MODULE_NAME,
                             evidence="\n".join(user_list),
                             suggested_commands=[
-                                f"ldapsearch -x -H ldap://{target} -b '{base_dn}' "
+                                f"ldapsearch -x -H {ldap_url} -b '{base_dn}' "
                                 f"'(objectClass=user)'",
                             ],
                         )

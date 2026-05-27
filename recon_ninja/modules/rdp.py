@@ -29,6 +29,26 @@ logger = logging.getLogger(__name__)
 MODULE_NAME = "rdp"
 
 
+def _is_rdp_port(state: ScanState) -> bool:
+    """Return ``True`` if port 3389 is open or the service is RDP."""
+    if 3389 in state.open_ports:
+        return True
+    for _port, svc in state.services.items():
+        if "rdp" in svc.service.lower() or "ms-wbt-server" in svc.service.lower():
+            return True
+    return False
+
+
+def _get_rdp_port(state: ScanState) -> int:
+    """Return the open RDP port, defaulting to 3389."""
+    if 3389 in state.open_ports:
+        return 3389
+    for port, svc in state.services.items():
+        if "rdp" in svc.service.lower() or "ms-wbt-server" in svc.service.lower():
+            return port
+    return 3389
+
+
 @module_guard()
 async def run_rdp_module(
     target: str,
@@ -38,7 +58,7 @@ async def run_rdp_module(
 ) -> ModuleResult:
     """Run RDP enumeration against *target*.
 
-    Triggered when port 3389 is open.
+    Triggered when port 3389 is open or the service is RDP.
 
     Parameters
     ----------
@@ -62,13 +82,15 @@ async def run_rdp_module(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Check trigger port ───────────────────────────────────────────────
-    if 3389 not in state.open_ports:
+    if not _is_rdp_port(state):
         return ModuleResult(
             module_name=MODULE_NAME,
             status="skipped",
             duration_seconds=time.monotonic() - start,
-            error_message="Port 3389 (RDP) not found open",
+            error_message="No RDP port (3389) or RDP service found open",
         )
+
+    rdp_port = _get_rdp_port(state)
 
     # ── 1. nmap RDP encryption & MS12-020 check ─────────────────────────
     if shutil.which("nmap"):
@@ -76,7 +98,7 @@ async def run_rdp_module(
         rc, stdout, stderr = await run_tool(
             cmd=[
                 "nmap",
-                "-p3389",
+                f"-p{rdp_port}",
                 "--script", "rdp-enum-encryption,rdp-vuln-ms12-020",
                 target,
             ],
@@ -97,18 +119,16 @@ async def run_rdp_module(
                             severity=Severity.INFO,
                             title="RDP NLA Enabled",
                             description=(
-                                f"RDP on {target}:3389 requires Network Level "
+                                f"RDP on {target}:{rdp_port} requires Network Level "
                                 f"Authentication (NLA / CredSSP). This is the "
                                 f"recommended configuration."
                             ),
                             module=MODULE_NAME,
-                            evidence=re.search(
-                                r"rdp-enum-encryption:.*?(?:\n\n|\Z)",
-                                stdout,
-                                re.DOTALL,
-                            )
-                            .group(0)
-                            .strip()[:1000],
+                            evidence=(
+                                m.group(0).strip()[:1000]
+                                if (m := re.search(r"rdp-enum-encryption:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                                else stdout[:1000]
+                            ),
                         )
                     )
                 else:
@@ -118,19 +138,17 @@ async def run_rdp_module(
                             severity=Severity.HIGH,
                             title="RDP NLA Disabled",
                             description=(
-                                f"RDP on {target}:3389 does NOT require Network "
+                                f"RDP on {target}:{rdp_port} does NOT require Network "
                                 f"Level Authentication. Without NLA, the server "
                                 f"is vulnerable to pre-authentication attacks "
                                 f"and credential stuffing."
                             ),
                             module=MODULE_NAME,
-                            evidence=re.search(
-                                r"rdp-enum-encryption:.*?(?:\n\n|\Z)",
-                                stdout,
-                                re.DOTALL,
-                            )
-                            .group(0)
-                            .strip()[:1000],
+                            evidence=(
+                                m.group(0).strip()[:1000]
+                                if (m := re.search(r"rdp-enum-encryption:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                                else stdout[:1000]
+                            ),
                             suggested_commands=[
                                 f"xfreerdp /v:{target} /u:admin /p:password +auth-only",
                                 f"rdesktop {target}",
@@ -160,19 +178,17 @@ async def run_rdp_module(
                             severity=Severity.HIGH,
                             title="RDP Vulnerable to MS12-020",
                             description=(
-                                f"RDP on {target}:3389 is vulnerable to "
+                                f"RDP on {target}:{rdp_port} is vulnerable to "
                                 f"MS12-020 (CVE-2012-0152), a remote code "
                                 f"execution vulnerability in the Remote "
                                 f"Desktop Protocol."
                             ),
                             module=MODULE_NAME,
-                            evidence=re.search(
-                                r"rdp-vuln-ms12-020:.*?(?:\n\n|\Z)",
-                                stdout,
-                                re.DOTALL,
-                            )
-                            .group(0)
-                            .strip()[:1000],
+                            evidence=(
+                                m.group(0).strip()[:1000]
+                                if (m := re.search(r"rdp-vuln-ms12-020:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                                else stdout[:1000]
+                            ),
                             cve="CVE-2012-0152",
                         )
                     )
@@ -181,7 +197,7 @@ async def run_rdp_module(
                         Finding(
                             severity=Severity.INFO,
                             title="RDP Not Vulnerable to MS12-020",
-                            description=f"RDP on {target}:3389 does not appear vulnerable to MS12-020.",
+                            description=f"RDP on {target}:{rdp_port} does not appear vulnerable to MS12-020.",
                             module=MODULE_NAME,
                         )
                     )
@@ -194,7 +210,7 @@ async def run_rdp_module(
         rc, stdout, stderr = await run_tool(
             cmd=[
                 "nmap",
-                "-p3389",
+                f"-p{rdp_port}",
                 "--script", "rdp-vuln-ms19-0708",
                 target,
             ],
@@ -211,23 +227,21 @@ async def run_rdp_module(
                             severity=Severity.CRITICAL,
                             title="RDP Vulnerable to BlueKeep (CVE-2019-0708)",
                             description=(
-                                f"RDP on {target}:3389 is VULNERABLE to "
+                                f"RDP on {target}:{rdp_port} is VULNERABLE to "
                                 f"BlueKeep (CVE-2019-0708). This is a "
                                 f"wormable, unauthenticated remote code "
                                 f"execution vulnerability affecting Windows "
                                 f"XP through Server 2008 R2. PATCH IMMEDIATELY."
                             ),
                             module=MODULE_NAME,
-                            evidence=re.search(
-                                r"rdp-vuln-ms19-0708:.*?(?:\n\n|\Z)",
-                                stdout,
-                                re.DOTALL,
-                            )
-                            .group(0)
-                            .strip()[:1000],
+                            evidence=(
+                                m.group(0).strip()[:1000]
+                                if (m := re.search(r"rdp-vuln-ms19-0708:.*?(?:\n\n|\Z)", stdout, re.DOTALL))
+                                else stdout[:1000]
+                            ),
                             cve="CVE-2019-0708",
                             suggested_commands=[
-                                f"nmap -p3389 --script rdp-vuln-ms19-0708 {target}",
+                                f"nmap -p{rdp_port} --script rdp-vuln-ms19-0708 {target}",
                                 "msfconsole -x 'use exploit/windows/rdp/cve_2019_0708_bluekeep_rce'",
                             ],
                         )
@@ -238,7 +252,7 @@ async def run_rdp_module(
                             severity=Severity.INFO,
                             title="RDP Not Vulnerable to BlueKeep",
                             description=(
-                                f"RDP on {target}:3389 does not appear "
+                                f"RDP on {target}:{rdp_port} does not appear "
                                 f"vulnerable to BlueKeep (CVE-2019-0708)."
                             ),
                             module=MODULE_NAME,
@@ -267,7 +281,7 @@ async def run_rdp_module(
                 "authentication and connection."
             ),
             module=MODULE_NAME,
-            evidence=f"Port 3389 open on {target}",
+            evidence=f"Port {rdp_port} open on {target}",
             suggested_commands=tool_suggestions,
         )
     )

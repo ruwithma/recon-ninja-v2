@@ -753,7 +753,12 @@ async def run_web_tech(
                 if ":" not in line:
                     continue
                 name, _, value = line.partition(":")
-                headers[name.strip().lower()] = value.strip()
+                key = name.strip().lower()
+                val = value.strip()
+                if key in headers:
+                    headers[key] = f"{headers[key]}; {val}"
+                else:
+                    headers[key] = val
 
             raw_parts.append(f"=== Headers ===\n{last_block}")
 

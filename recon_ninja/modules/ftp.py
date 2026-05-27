@@ -37,6 +37,16 @@ def _is_ftp_port(state: ScanState) -> bool:
     return False
 
 
+def _get_ftp_port(state: ScanState) -> int:
+    """Return the open FTP port, defaulting to 21."""
+    if 21 in state.open_ports:
+        return 21
+    for port, svc in state.services.items():
+        if "ftp" in svc.service.lower():
+            return port
+    return 21
+
+
 @module_guard()
 async def run_ftp_module(
     target: str,
@@ -65,6 +75,8 @@ async def run_ftp_module(
             error_message="No FTP port (21) or FTP service found.",
         )
 
+    ftp_port = _get_ftp_port(state)
+
     # Prepare output subdirectory
     ftp_dir = output_dir / "ftp"
     ftp_dir.mkdir(parents=True, exist_ok=True)
@@ -79,7 +91,7 @@ async def run_ftp_module(
         nmap_out = ftp_dir / "nmap_ftp.txt"
         cmd = [
             "nmap",
-            "-p21",
+            f"-p{ftp_port}",
             "--script", "ftp-anon,ftp-syst,ftp-bounce",
             target,
         ]
@@ -91,8 +103,12 @@ async def run_ftp_module(
         if stdout:
             # --- Banner ---
             banner_match = re.search(
-                r"21/tcp\s+open\s+ftp\s+(.*)", stdout, re.IGNORECASE
+                rf"{ftp_port}/tcp\s+open\s+ftp\s+(.*)", stdout, re.IGNORECASE
             )
+            if not banner_match:
+                banner_match = re.search(
+                    r"21/tcp\s+open\s+ftp\s+(.*)", stdout, re.IGNORECASE
+                )
             banner = banner_match.group(1).strip() if banner_match else ""
 
             if banner:

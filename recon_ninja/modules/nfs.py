@@ -60,6 +60,26 @@ def _parse_showmount_shares(output: str) -> list[str]:
     return shares
 
 
+def _is_nfs_port(state: ScanState) -> bool:
+    """Return ``True`` if port 2049 is open or the service is NFS."""
+    if 2049 in state.open_ports:
+        return True
+    for _port, svc in state.services.items():
+        if "nfs" in svc.service.lower():
+            return True
+    return False
+
+
+def _get_nfs_port(state: ScanState) -> int:
+    """Return the open NFS port, defaulting to 2049."""
+    if 2049 in state.open_ports:
+        return 2049
+    for port, svc in state.services.items():
+        if "nfs" in svc.service.lower():
+            return port
+    return 2049
+
+
 @module_guard()
 async def run_nfs_module(
     target: str,
@@ -69,7 +89,7 @@ async def run_nfs_module(
 ) -> ModuleResult:
     """Run NFS enumeration against *target*.
 
-    Triggered when port 2049 is open.
+    Triggered when port 2049 is open or the service is NFS.
 
     Parameters
     ----------
@@ -93,13 +113,15 @@ async def run_nfs_module(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Check trigger port ───────────────────────────────────────────────
-    if 2049 not in state.open_ports:
+    if not _is_nfs_port(state):
         return ModuleResult(
             module_name=MODULE_NAME,
             status="skipped",
             duration_seconds=time.monotonic() - start,
-            error_message="Port 2049 (NFS) not found open",
+            error_message="No NFS port (2049) or NFS service found open",
         )
+
+    nfs_port = _get_nfs_port(state)
 
     # ── 1. showmount -e — list exported shares ──────────────────────────
     discovered_shares: list[str] = []
@@ -141,7 +163,7 @@ async def run_nfs_module(
                         severity=Severity.INFO,
                         title="NFS Service Detected — No Exported Shares",
                         description=(
-                            f"NFS is running on {target}:2049 but no exported "
+                            f"NFS is running on {target}:{nfs_port} but no exported "
                             f"shares were listed by showmount."
                         ),
                         module=MODULE_NAME,
@@ -159,7 +181,7 @@ async def run_nfs_module(
         rc, stdout, stderr = await run_tool(
             cmd=[
                 "nmap",
-                "-p2049",
+                f"-p{nfs_port}",
                 "--script", "nfs-ls,nfs-showmount,nfs-statfs",
                 target,
             ],

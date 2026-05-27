@@ -120,6 +120,26 @@ def _parse_nmap_krb_users(nmap_output: str) -> list[str]:
     return list(set(users))
 
 
+def _is_kerberos_port(state: ScanState) -> bool:
+    """Return ``True`` if port 88 is open or the service is Kerberos."""
+    if 88 in state.open_ports:
+        return True
+    for _port, svc in state.services.items():
+        if "kerberos" in svc.service.lower():
+            return True
+    return False
+
+
+def _get_kerberos_port(state: ScanState) -> int:
+    """Return the open Kerberos port, defaulting to 88."""
+    if 88 in state.open_ports:
+        return 88
+    for port, svc in state.services.items():
+        if "kerberos" in svc.service.lower():
+            return port
+    return 88
+
+
 @module_guard()
 async def run_kerberos_module(
     target: str,
@@ -129,7 +149,7 @@ async def run_kerberos_module(
 ) -> ModuleResult:
     """Run Kerberos enumeration against *target*.
 
-    Triggered when port 88 is open.
+    Triggered when port 88 is open or the service is Kerberos.
 
     Parameters
     ----------
@@ -153,13 +173,15 @@ async def run_kerberos_module(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Check trigger port ───────────────────────────────────────────────
-    if 88 not in state.open_ports:
+    if not _is_kerberos_port(state):
         return ModuleResult(
             module_name=MODULE_NAME,
             status="skipped",
             duration_seconds=time.monotonic() - start,
-            error_message="Port 88 (Kerberos) not found open",
+            error_message="No Kerberos port (88) or service found open",
         )
+
+    kerberos_port = _get_kerberos_port(state)
 
     # ── Derive domain ────────────────────────────────────────────────────
     domain = _derive_domain(state, config)
@@ -220,7 +242,7 @@ async def run_kerberos_module(
         nmap_out = output_dir / "kerberos_nmap.txt"
         nmap_cmd: list[str] = [
             "nmap",
-            "-p88",
+            f"-p{kerberos_port}",
             "--script", "krb5-enum-users",
         ]
         if domain:
@@ -264,12 +286,12 @@ async def run_kerberos_module(
             severity=Severity.INFO,
             title="Kerberos Service Detected",
             description=(
-                f"Kerberos (port 88) is open on {target}. This indicates "
+                f"Kerberos (port {kerberos_port}) is open on {target}. This indicates "
                 f"an Active Directory environment which may be vulnerable "
                 f"to AS-REP roasting and Kerberoasting."
             ),
             module=MODULE_NAME,
-            evidence=f"Port 88 open on {target}",
+            evidence=f"Port {kerberos_port} open on {target}",
         )
     )
 

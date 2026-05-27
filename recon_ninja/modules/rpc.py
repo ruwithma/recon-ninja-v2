@@ -76,6 +76,36 @@ def _parse_rpcclient_groups(output: str) -> list[str]:
     return list(set(groups))
 
 
+def _is_rpc_port(state: ScanState) -> bool:
+    """Return ``True`` if port 111 or 135 is open, or RPC-related service is open."""
+    if any(p in state.open_ports for p in (111, 135)):
+        return True
+    for _port, svc in state.services.items():
+        if any(name in svc.service.lower() for name in ("rpc", "portmapper", "rpcbind", "msrpc")):
+            return True
+    return False
+
+
+def _get_portmapper_port(state: ScanState) -> int | None:
+    """Return open portmapper port or None."""
+    if 111 in state.open_ports:
+        return 111
+    for port, svc in state.services.items():
+        if any(name in svc.service.lower() for name in ("portmapper", "rpcbind")):
+            return port
+    return None
+
+
+def _get_msrpc_port(state: ScanState) -> int | None:
+    """Return open MSRPC port or None."""
+    if 135 in state.open_ports:
+        return 135
+    for port, svc in state.services.items():
+        if "msrpc" in svc.service.lower() or ("rpc" in svc.service.lower() and port != 111 and "rpcbind" not in svc.service.lower() and "portmapper" not in svc.service.lower()):
+            return port
+    return None
+
+
 @module_guard()
 async def run_rpc_module(
     target: str,
@@ -85,7 +115,7 @@ async def run_rpc_module(
 ) -> ModuleResult:
     """Run RPC enumeration against *target*.
 
-    Triggered when port 111 (rpcbind) or 135 (MSRPC) is open.
+    Triggered when port 111 (rpcbind) or 135 (MSRPC) is open, or service matches RPC.
 
     Parameters
     ----------
@@ -109,15 +139,16 @@ async def run_rpc_module(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Check trigger ports ──────────────────────────────────────────────
-    open_ports = set(state.open_ports)
-    rpc_ports = {111, 135}
-    if not rpc_ports.intersection(open_ports):
+    if not _is_rpc_port(state):
         return ModuleResult(
             module_name=MODULE_NAME,
             status="skipped",
             duration_seconds=time.monotonic() - start,
-            error_message="No RPC ports (111/135) found open",
+            error_message="No RPC ports (111/135) or RPC services found open",
         )
+
+    portmapper_port = _get_portmapper_port(state)
+    msrpc_port = _get_msrpc_port(state)
 
     # ── 1. rpcclient null-session enumeration (port 135 / SMB) ──────────
     if shutil.which("rpcclient"):
@@ -219,7 +250,7 @@ async def run_rpc_module(
         logger.warning("rpcclient not found — skipping null-session enumeration")
 
     # ── 2. rpcinfo — registered RPC services (port 111) ─────────────────
-    if 111 in open_ports and shutil.which("rpcinfo"):
+    if portmapper_port is not None and shutil.which("rpcinfo"):
         rpcinfo_out = output_dir / "rpc_rpcinfo.txt"
         rc, stdout, stderr = await run_tool(
             cmd=["rpcinfo", "-p", target],
@@ -247,16 +278,16 @@ async def run_rpc_module(
                 )
             )
     else:
-        if 111 in open_ports:
+        if portmapper_port is not None:
             logger.debug("rpcinfo not available — skipping registered RPC service query")
 
     # ── 3. nmap msrpc-enum NSE script (port 135) ────────────────────────
-    if 135 in open_ports and shutil.which("nmap"):
+    if msrpc_port is not None and shutil.which("nmap"):
         nmap_out = output_dir / "rpc_nmap.txt"
         rc, stdout, stderr = await run_tool(
             cmd=[
                 "nmap",
-                "-p135",
+                f"-p{msrpc_port}",
                 "--script", "msrpc-enum",
                 target,
             ],
@@ -272,14 +303,14 @@ async def run_rpc_module(
                     title="MSRPC Endpoints Enumerated",
                     description=(
                         f"nmap msrpc-enum script discovered RPC endpoints "
-                        f"on {target} port 135."
+                        f"on {target} port {msrpc_port}."
                     ),
                     module=MODULE_NAME,
                     evidence=stdout[:2000],
                 )
             )
     else:
-        if 135 in open_ports:
+        if msrpc_port is not None:
             logger.debug("nmap not available — skipping msrpc-enum NSE script")
 
     # ── 4. impacket-rpcdump (optional) ──────────────────────────────────
