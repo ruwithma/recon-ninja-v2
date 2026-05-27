@@ -506,9 +506,12 @@ def _build_markdown(state: ScanState) -> str:
 
     # 8. Suggested Attack Paths
     lines.append("## Suggested Attack Paths\n")
-    commands = _deduplicated_commands(state.all_findings, limit=10)
-    if commands:
-        for i, cmd in enumerate(commands, 1):
+    # Combine finding-level commands with context-aware attack paths
+    finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
+    context_cmds = _generate_attack_paths(state)
+    all_cmds = finding_cmds + [c for c in context_cmds if c not in set(finding_cmds)]
+    if all_cmds:
+        for i, cmd in enumerate(all_cmds[:20], 1):
             lines.append(f"{i}. `{cmd}`")
     else:
         lines.append("*No suggested attack paths.*")
@@ -537,7 +540,7 @@ def _write_service_details_md(lines: list[str], state: ScanState) -> None:
     service_groups: dict[str, list[ServiceInfo]] = {}
     for port in sorted(state.services):
         svc = state.services[port]
-        group = _service_group(svc.service)
+        group = _service_group(svc.service, svc.port)
         service_groups.setdefault(group, []).append(svc)
 
     icons: dict[str, str] = {
@@ -579,10 +582,17 @@ def _write_service_details_md(lines: list[str], state: ScanState) -> None:
             lines.append("")
 
 
-def _service_group(service: str) -> str:
+def _service_group(service: str, port: int = 0) -> str:
     """Classify a service string into a display group name."""
     svc = service.lower()
     if "http" in svc or "ssl/http" in svc:
+        return "Web"
+    # Common web ports that nmap misidentifies (e.g. port 3000 → "ppp")
+    _KNOWN_WEB_PORTS = {
+        3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
+        8888, 9000, 9090,
+    }
+    if port in _KNOWN_WEB_PORTS:
         return "Web"
     if "smb" in svc or "microsoft-ds" in svc or "netbios" in svc:
         return "SMB"
@@ -637,7 +647,7 @@ def _build_html(state: ScanState) -> str:
     service_details = []
     for port in sorted(state.services):
         svc = state.services[port]
-        group = _service_group(svc.service)
+        group = _service_group(svc.service, svc.port)
         icon_map = {
             "Web": "🌐", "SMB": "📂", "SSH": "🔐", "FTP": "📁",
             "DNS": "🔍", "SMTP": "📧", "LDAP": "🏛️", "Kerberos": "🎫",
@@ -677,7 +687,9 @@ def _build_html(state: ScanState) -> str:
     loot = _extract_loot(state)
 
     # Attack commands
-    attack_commands = _deduplicated_commands(state.all_findings, limit=10)
+    finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
+    context_cmds = _generate_attack_paths(state)
+    attack_commands = finding_cmds + [c for c in context_cmds if c not in set(finding_cmds)]
 
     # Output files
     output_files = _collect_output_files(state)
@@ -874,6 +886,125 @@ def _deduplicated_commands(findings: list[Finding], limit: int = 10) -> list[str
             if len(commands) >= limit:
                 return commands
     return commands
+
+
+def _generate_attack_paths(state: ScanState) -> list[str]:
+    """Generate context-aware attack path suggestions based on the scan state.
+
+    This uses the detected services, box profile, and known ports to suggest
+    concrete attack commands that a pentester/CTF player can copy-paste.
+
+    Parameters
+    ----------
+    state:
+        The completed :class:`ScanState`.
+
+    Returns
+    -------
+    list[str]
+        Ordered list of attack command suggestions.
+    """
+    commands: list[str] = []
+    target = state.target
+    port_set = set(state.open_ports)
+    services = state.services
+
+    # --- SSH ---
+    if 22 in port_set or any("ssh" in s.service.lower() for s in services.values()):
+        commands.append(f"ssh {target}  # Try default creds: root:root, admin:admin")
+        commands.append(f"hydra -l root -P /usr/share/wordlists/rockyou.txt ssh://{target}")
+
+    # --- Web ---
+    _KNOWN_WEB_PORTS = {
+        80, 443, 8080, 8443,
+        3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
+        8888, 9000, 9090, 4443,
+    }
+    web_ports = []
+    for p in state.open_ports:
+        if p in _KNOWN_WEB_PORTS:
+            web_ports.append(p)
+        elif p in services and "http" in services[p].service.lower():
+            web_ports.append(p)
+    for wp in web_ports:
+        svc = services.get(wp)
+        scheme = "https" if wp in (443, 8443, 4443) else "http"
+        url = f"{scheme}://{target}:{wp}"
+        commands.append(f"nmap -p{wp} --script http-enum,http-headers,http-methods,http-vuln* {target}")
+        commands.append(f"nikto -h {url}")
+        commands.append(f"feroxbuster -u {url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt")
+        commands.append(f"gobuster dir -u {url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt")
+        # Only suggest one curl per web port
+        commands.append(f"curl -sI {url}  # Check headers for tech stack")
+        break  # One set of web commands is enough; adjust port manually
+
+    # --- SMB ---
+    if port_set.intersection({139, 445}):
+        commands.append(f"smbclient -L //{target}/ -N")
+        commands.append(f"smbmap -H {target}")
+        commands.append(f"enum4linux -a {target}")
+        commands.append(f"crackmapexec smb {target}")
+
+    # --- FTP ---
+    if 21 in port_set:
+        commands.append(f"ftp {target}  # Try anonymous:anonymous")
+        commands.append(f"hydra -l admin -P /usr/share/wordlists/rockyou.txt ftp://{target}")
+
+    # --- DNS ---
+    if 53 in port_set:
+        commands.append(f"dnsrecon -d {target} -t std")
+        commands.append(f"dig axfr {target} @{target}")
+
+    # --- SNMP ---
+    if 161 in set(state.udp_ports):
+        commands.append(f"snmpwalk -v2c -c public {target}")
+        commands.append(f"onesixtyone -c /usr/share/seclists/Discovery/SNMP/common-snmp-community-strings.txt {target}")
+
+    # --- LDAP ---
+    if port_set.intersection({389, 636}):
+        commands.append(f"ldapsearch -x -H ldap://{target} -b '' -s base namingContexts")
+        commands.append(f"enum4linux -a {target}")
+
+    # --- Kerberos ---
+    if 88 in port_set:
+        commands.append(f"kerbrute userenum --domain corp.local --dc {target} /usr/share/seclists/Usernames/xato-net-10-million-usernames.txt")
+
+    # --- NFS ---
+    if 2049 in port_set:
+        commands.append(f"showmount -e {target}")
+        commands.append(f"mount -t nfs {target}:/ /mnt/nfs")
+
+    # --- RDP ---
+    if 3389 in port_set:
+        commands.append(f"xfreerdp /v:{target} /cert:ignore /u:admin")
+
+    # --- Database ---
+    db_ports = {3306: "mysql", 5432: "psql", 1433: "mssql", 6379: "redis-cli", 27017: "mongosh"}
+    for dp, tool in db_ports.items():
+        if dp in port_set:
+            if tool == "mysql":
+                commands.append(f"mysql -h {target} -u root -p")
+            elif tool == "psql":
+                commands.append(f"psql -h {target} -U postgres")
+            elif tool == "mssql":
+                commands.append(f"impacket-mssqlclient admin@{target}")
+            elif tool == "redis-cli":
+                commands.append(f"redis-cli -h {target} INFO")
+            elif tool == "mongosh":
+                commands.append(f"mongosh mongodb://{target}")
+
+    # --- Nuclei ---
+    commands.append(f"nuclei -u {target} -t /usr/share/nuclei-templates/")
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for cmd in commands:
+        if cmd not in seen:
+            seen.add(cmd)
+            unique.append(cmd)
+
+    return unique[:20]  # cap at 20 suggestions
 
 
 def _collect_output_files(state: ScanState) -> list[str]:

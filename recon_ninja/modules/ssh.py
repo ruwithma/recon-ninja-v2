@@ -113,6 +113,10 @@ async def run_ssh_module(
                         description=f"SSH server banner: {banner}",
                         module=MODULE_NAME,
                         evidence=banner,
+                        suggested_commands=[
+                            f"searchsploit '{banner}'",
+                            f"ssh {target} -p {ssh_port}  # Try default creds",
+                        ],
                     )
                 )
 

@@ -124,11 +124,27 @@ class ServiceInfo:
 
     @property
     def url(self) -> str | None:
-        """Construct a URL for web services."""
-        if "http" not in self.service and "ssl/http" not in self.service:
-            return None
-        scheme = "https" if "ssl" in self.service or self.port in (443, 8443) else "http"
-        return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
+        """Construct a URL for web services.
+
+        Detects web services both by nmap service name (http/https/ssl/http)
+        and by common web port numbers that nmap sometimes misidentifies.
+        """
+        # Known web service name patterns
+        if any(p in self.service.lower() for p in ("http", "ssl/http", "https")):
+            scheme = "https" if "ssl" in self.service or self.port in (443, 8443) else "http"
+            return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
+
+        # Common web ports that nmap sometimes misidentifies (e.g. port 3000 → "ppp")
+        _KNOWN_WEB_PORTS = {
+            80, 443, 8080, 8443,  # standard
+            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,  # dev/app servers
+            8888, 9000, 9090, 4443,  # other common web ports
+        }
+        if self.port in _KNOWN_WEB_PORTS:
+            scheme = "https" if self.port in (443, 8443, 4443) else "http"
+            return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
+
+        return None
 
     @property
     def display_product(self) -> str:
@@ -269,11 +285,21 @@ class ScanState:
 
     @property
     def web_ports(self) -> list[int]:
-        """Ports with HTTP/HTTPS services."""
+        """Ports with HTTP/HTTPS services.
+
+        Includes ports detected as HTTP by nmap service name AND
+        common web ports that nmap sometimes misidentifies.
+        """
+        # Common web ports that nmap may misidentify
+        _KNOWN_WEB_PORTS = {
+            80, 443, 8080, 8443,  # standard
+            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,  # dev/app servers
+            8888, 9000, 9090, 4443,  # other common web ports
+        }
         return [
             port
             for port, svc in self.services.items()
-            if "http" in svc.service.lower()
+            if "http" in svc.service.lower() or port in _KNOWN_WEB_PORTS
         ]
 
     @property

@@ -669,8 +669,10 @@ class ReconEngine:
 
         loot_patterns: dict[str, list[str]] = {
             "credentials": [
-                r"password", r"passwd", r"pwd", r"login", r"credential",
-                r"secret", r"apikey", r"api_key", r"token",
+                r"password\s*[:=]", r"passwd\s*[:=]", r"pwd\s*[:=]",
+                r"login\s*[:=]", r"credential\s*[:=]",
+                r"secret\s*[:=]", r"apikey\s*[:=]", r"api_key\s*[:=]",
+                r"token\s*[:=]",
             ],
             "flags": [
                 r"flag\{", r"HTB\{", r"THM\{", r"CTF\{", r"picoCTF\{",
@@ -681,7 +683,6 @@ class ReconEngine:
             ],
             "keys": [
                 r"BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY",
-                r"ssh-rsa ", r"ssh-ed25519 ",
             ],
         }
 
@@ -955,8 +956,16 @@ class ReconEngine:
         def has_service(name: str) -> bool:
             return any(name in sn for sn in service_names)
 
-        # Web: any port with "http" service
-        if has_service("http"):
+        # Common web ports that nmap may misidentify (e.g. port 3000 → "ppp")
+        _KNOWN_WEB_PORTS = {
+            80, 443, 8080, 8443,
+            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
+            8888, 9000, 9090, 4443,
+        }
+        has_web_port = bool(port_set.intersection(_KNOWN_WEB_PORTS))
+
+        # Web: any port with "http" service OR a known web port number
+        if has_service("http") or has_web_port:
             if "web" in module_name_to_func:
                 relevant.append(("web", module_name_to_func["web"]))
 
@@ -1056,12 +1065,19 @@ class ReconEngine:
             svc.service.lower() for svc in self.state.services.values()
         }
 
+        # Common web ports — nmap sometimes misidentifies these
+        _KNOWN_WEB_PORTS = {
+            80, 443, 8080, 8443,
+            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
+            8888, 9000, 9090, 4443,
+        }
+
         has_kerberos = 88 in port_set
         has_ldap = bool(port_set.intersection({389, 636}))
         has_smb = bool(port_set.intersection({139, 445}))
         has_winrm = bool(port_set.intersection({5985, 5986}))
         has_ssh = 22 in port_set
-        has_http = bool(port_set.intersection({80, 443, 8080, 8443})) or "http" in service_names
+        has_http = bool(port_set.intersection(_KNOWN_WEB_PORTS)) or "http" in service_names
         has_iis = any("iis" in p for p in service_products)
 
         # WINDOWS_AD: ports 88 + 389 + 445 + (5985 or 139)
