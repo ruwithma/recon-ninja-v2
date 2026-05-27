@@ -279,19 +279,46 @@ def _create_output_dir(
     output: Optional[Path],
     timestamp_dirs: bool,
 ) -> Path:
-    """Create and return the output directory path."""
+    """Create and return the output directory path.
+
+    Falls back to ``~/reconninja-results/`` if the default ``results/``
+    directory is not writable (e.g. when a previous ``sudo`` run left it
+    owned by root).
+    """
     if output is not None:
-        out = output
+        base = output.parent if output.suffix else output
+        dirname = output.name if output.suffix else None
     else:
         base = Path("results")
+        dirname = None
+
+    if dirname is None:
         if timestamp_dirs:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out = base / f"{target}_{ts}"
+            dirname = f"{target}_{ts}"
         else:
-            out = base / target
+            dirname = target
 
-    out.mkdir(parents=True, exist_ok=True)
-    return out
+    out = (output if output is not None and output.suffix else base / dirname)
+
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+    except PermissionError:
+        # The directory (likely ./results/) is owned by root from a previous
+        # sudo run.  Fall back to a user-writable location.
+        fallback_base = Path.home() / "reconninja-results"
+        fallback = fallback_base / dirname
+        Console(stderr=True).print(
+            f"[bold yellow][!][/] [yellow]Cannot write to[/] [bold]{out}[/] "
+            f"[yellow](permission denied).[/]\n"
+            f"    [dim]This usually happens when a previous scan was run with sudo.[/]\n"
+            f"    [dim]Fix:[/] [cyan]sudo chown -R $(whoami) results/[/]  "
+            f"[dim]or run with sudo.[/]\n"
+            f"    [dim]Using fallback:[/] [bold green]{fallback}[/]"
+        )
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
 
 
 # ---------------------------------------------------------------------------
