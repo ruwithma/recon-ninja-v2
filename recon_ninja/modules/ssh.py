@@ -273,20 +273,25 @@ def _parse_algorithms(output: str) -> dict[str, list[str]]:
             continue
         if not in_algo_section:
             continue
-        # Category header (e.g., "  kex_algorithms (X)")
-        cat_match = re.match(r"\s+(\w+)\s+\(\d+\)", stripped)
+        # End of nmap script section — standalone "|_" with nothing after
+        if stripped == "|_":
+            in_algo_section = False
+            continue
+        # Remove leading nmap formatting: | or |_  followed by spaces
+        content = re.sub(r'^\|_\s*', '', stripped)
+        content = re.sub(r'^\|\s*', '', content)
+        content = content.strip()
+        if not content:
+            continue
+        # Category header (e.g., "kex_algorithms (3)")
+        cat_match = re.match(r"(\w+)\s+\(\d+\)$", content)
         if cat_match:
             current_category = cat_match.group(1)
             algos[current_category] = []
             continue
         # Algorithm entry
-        if current_category and stripped.startswith("|") and stripped not in ("|", "|_"):
-            algo_name = stripped.lstrip("| ").strip()
-            if algo_name:
-                algos[current_category].append(algo_name)
-        # End of section
-        if stripped.startswith("|_"):
-            in_algo_section = False
+        if current_category and content:
+            algos[current_category].append(content)
 
     return algos
 

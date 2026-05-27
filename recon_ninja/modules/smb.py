@@ -288,11 +288,11 @@ async def run_smb_module(
         raw_outputs.append(stdout or stderr)
 
         if stdout:
-            # Signing status
-            signing_match = re.search(r"signing:?(\s+\S+)", stdout, re.IGNORECASE)
+            # Signing status — capture multi-word values like "not required"
+            signing_match = re.search(r"signing:?\s+(.+?)(?:\s{2,}|\n|$)", stdout, re.IGNORECASE)
             if signing_match:
                 signing_val = signing_match.group(1).strip()
-                if signing_val.lower() in ("not required", "false", "disabled"):
+                if signing_val.lower() in ("not required", "false", "disabled", "(not required)"):
                     findings.append(
                         Finding(
                             severity=Severity.MEDIUM,
@@ -367,8 +367,11 @@ def _parse_smbclient_shares(output: str) -> list[str]:
             in_shares = True
             continue
         if in_shares:
+            # Skip separator lines like "--------- ------- -------"
+            if line.strip().startswith("---"):
+                continue
             # End of share section — a blank line or a different section header
-            if not line.strip() or line.startswith("---") or line.startswith("Server"):
+            if not line.strip() or line.startswith("Server") or line.startswith("Workgroup"):
                 break
             parts = line.split()
             if len(parts) >= 2 and parts[1] in ("Disk", "IPC", "Printer"):

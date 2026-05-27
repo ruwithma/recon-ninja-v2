@@ -103,7 +103,7 @@ def format_tool_status(available: dict[str, bool]) -> str:
     str
         Plain-text rendering of the tool status table.
     """
-    console = Console(width=80, force_terminal=True, legacy_windows=False)
+    console = Console(width=80, force_terminal=True, legacy_windows=False, record=True)
 
     table = Table(title="Tool Availability", show_lines=False, expand=False)
     table.add_column("Tool", style="bold", no_wrap=True)
