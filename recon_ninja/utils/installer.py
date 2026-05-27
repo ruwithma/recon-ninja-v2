@@ -22,12 +22,12 @@ import os
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
+
 
 from recon_ninja.utils.checker import (
     ToolInfo,
@@ -708,7 +708,7 @@ class ToolInstaller:
             )
             self.console.print(
                 "[dim]Run 'source ~/.bashrc' (or ~/.zshrc) to update your PATH, "
-                "then: reconninja check-tools[/]""
+                "then: reconninja check-tools[/]"
             )
 
 

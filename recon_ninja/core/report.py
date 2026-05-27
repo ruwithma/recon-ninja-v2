@@ -33,7 +33,7 @@ from typing import Any
 import aiofiles
 from jinja2 import BaseLoader, Environment
 
-from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity, TechInfo
+from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -480,7 +480,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append(f"# ReconNinja Report — {state.target} — {now}\n")
 
     # 2. Target Information
-    lines.append("## Target Information\n")
+    lines.append("## 🎯 Target Information\n")
     lines.append("| Field | Value |")
     lines.append("|-------|-------|")
     lines.append(f"| **Target** | `{state.target}` |")
@@ -488,10 +488,13 @@ def _build_markdown(state: ScanState) -> str:
     lines.append(f"| **Box Profile** | {state.box_profile} |")
     lines.append(f"| **Scan Duration** | {duration} |")
     lines.append(f"| **Open Ports** | {len(state.open_ports)} |")
+    tech_count = len(state.detected_techs)
+    vuln_count = len(state.vulnerable_techs())
+    lines.append(f"| **Technologies** | {tech_count} detected ({vuln_count} vulnerable) |")
     lines.append("")
 
     # 3. Open Ports & Services
-    lines.append("## Open Ports & Services\n")
+    lines.append("## 🌐 Open Ports & Services\n")
     if state.services:
         lines.append("| Port | Proto | Service | Product | Version |")
         lines.append("|------|-------|---------|---------|---------|")
@@ -507,11 +510,11 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 4. Box Profile
-    lines.append("## Box Profile\n")
+    lines.append("## 📦 Box Profile\n")
     lines.append(f"**{state.box_profile}**\n")
 
     # 4.5 Tech Stack
-    lines.append("## Detected Technologies\n")
+    lines.append("## 🔬 Detected Technologies\n")
     if state.detected_techs:
         # Group by port
         ports_with_techs = sorted({t.port for t in state.detected_techs})
@@ -548,7 +551,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 5. Key Findings
-    lines.append("## Key Findings\n")
+    lines.append("## 🔥 Key Findings\n")
     sorted_findings = sorted(state.all_findings, key=lambda f: f.severity.rank)
     if sorted_findings:
         for finding in sorted_findings:
@@ -565,11 +568,11 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 6. Per-Service Details
-    lines.append("## Per-Service Details\n")
+    lines.append("## 📋 Per-Service Details\n")
     _write_service_details_md(lines, state)
 
     # 7. Loot
-    lines.append("## Loot\n")
+    lines.append("## 💰 Loot\n")
     loot = _extract_loot(state)
     if loot:
         lines.append("| Category | Count |")
@@ -581,7 +584,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 8. Suggested Attack Paths
-    lines.append("## Suggested Attack Paths\n")
+    lines.append("## ⚔️ Suggested Attack Paths\n")
     # Combine finding-level commands with context-aware attack paths
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
     context_cmds = _generate_attack_paths(state)
@@ -594,7 +597,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 9. Raw Output File Index
-    lines.append("## Raw Output File Index\n")
+    lines.append("## 📁 Raw Output File Index\n")
     output_files = _collect_output_files(state)
     if output_files:
         for fpath in sorted(output_files):
@@ -1004,8 +1007,6 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
     techs = state.detected_techs
 
     # Build tech lookup for attack path generation
-    tech_names = {t.name.lower() for t in techs}
-    tech_categories = {t.category for t in techs if t.category}
 
     # --- Vulnerable techs (highest priority) ---
     vulnerable = state.vulnerable_techs()
@@ -1034,7 +1035,6 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
         elif p in services and "http" in services[p].service.lower():
             web_ports.append(p)
     for wp in web_ports:
-        svc = services.get(wp)
         scheme = "https" if wp in (443, 8443, 4443) else "http"
         url = f"{scheme}://{target}:{wp}"
         commands.append(f"nmap -p{wp} --script http-enum,http-headers,http-methods,http-vuln* {target}")

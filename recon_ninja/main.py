@@ -31,7 +31,7 @@ from rich.table import Table
 from recon_ninja import __version__
 from recon_ninja.core.config import load_config, MergeConfig
 from recon_ninja.core.engine import ReconEngine, PHASE_NAMES
-from recon_ninja.core.models import ReconConfig, ScanState
+from recon_ninja.core.models import ReconConfig
 from recon_ninja.core.state import StateManager
 from recon_ninja.utils.checker import (
     check_tools,

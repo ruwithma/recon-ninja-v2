@@ -90,6 +90,21 @@ _SERVICE_STYLES: dict[str, str] = {
     "winrm": "bright_green",
 }
 
+# Category → icon for tech stack
+_CATEGORY_ICONS: dict[str, str] = {
+    "language": "🔤",
+    "framework": "🏗️",
+    "cms": "📝",
+    "server": "🖥️",
+    "waf": "🛡️",
+    "library": "📚",
+    "os": "💾",
+    "cdn": "🌐",
+    "database": "🗄️",
+    "analytics": "📊",
+    "other": "❓",
+}
+
 
 def _service_style(service: str) -> str:
     """Return a Rich style string for *service*, falling back to ``white``."""
@@ -98,6 +113,14 @@ def _service_style(service: str) -> str:
         if key in svc_lower:
             return style
     return "white"
+
+
+def _truncate(text: str, max_len: int = 120) -> str:
+    """Truncate text to max_len with ellipsis, preserving first line."""
+    first_line = text.split("\n")[0]
+    if len(first_line) > max_len:
+        return first_line[:max_len - 1] + "…"
+    return first_line
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +208,11 @@ def display_preflight_checklist(
 
     # SecLists
     sl_icon = "✅" if seclists_found else "⚠️"
-    sl_detail = "[green]found[/]" if seclists_found else "[yellow]not found — some modules will be limited[/]"
+    sl_detail = (
+        "[green]found[/]"
+        if seclists_found
+        else "[yellow]not found — some modules limited[/]"
+    )
     table.add_row(sl_icon, "SecLists", sl_detail)
 
     # VPN
@@ -195,7 +222,11 @@ def display_preflight_checklist(
 
     # Root
     root_icon = "✅" if is_root else "⚠️"
-    root_detail = "[green]running as root[/]" if is_root else "[yellow]non-root — some scans limited[/]"
+    root_detail = (
+        "[green]running as root[/]"
+        if is_root
+        else "[yellow]non-root — some scans limited[/]"
+    )
     table.add_row(root_icon, "Root", root_detail)
 
     panel = Panel(
@@ -219,13 +250,16 @@ def display_phase_header(phase_num: int, phase_name: str) -> None:
     Parameters
     ----------
     phase_num:
-        The phase number (1–4).
+        The phase number (1–7).
     phase_name:
         A human-readable name for the phase.
     """
     console = get_console()
     console.print()
-    console.rule(f"[bold bright_yellow]⚡ Phase {phase_num}: {phase_name}", style="bright_yellow")
+    console.rule(
+        f"[bold bright_yellow]⚡ Phase {phase_num}: {phase_name}",
+        style="bright_yellow",
+    )
     console.print()
 
 
@@ -256,6 +290,7 @@ def display_port_table(services: dict[int, ServiceInfo]) -> None:
     )
     table.add_column("PORT", style="bold", justify="right", width=6)
     table.add_column("PROTO", width=5)
+    table.add_column("STATE", width=7)
     table.add_column("SERVICE", width=16)
     table.add_column("PRODUCT", min_width=20)
     table.add_column("VERSION", min_width=14)
@@ -263,9 +298,11 @@ def display_port_table(services: dict[int, ServiceInfo]) -> None:
     for port in sorted(services):
         svc = services[port]
         style = _service_style(svc.service)
+        state_icon = "[green]open[/]" if svc.state == "open" else f"[yellow]{svc.state}[/]"
         table.add_row(
             str(port),
             svc.proto,
+            state_icon,
             f"[{style}]{svc.service}[/]",
             svc.product or "—",
             svc.version or "—",
@@ -301,9 +338,7 @@ def display_box_profile(profile: str) -> None:
     else:
         accent = "white"
 
-    console.print(
-        f"  🎯 Box profile: [bold {accent}]{profile}[/]"
-    )
+    console.print(f"  🎯 Box profile: [bold {accent}]{profile}[/]")
     console.print()
 
 
@@ -338,18 +373,16 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
             border_style="cyan",
             title_style="bold bright_cyan",
         )
+        table.add_column("", width=4)
         table.add_column("Technology", style="bold", min_width=16)
         table.add_column("Version", width=12)
         table.add_column("Category", width=12)
         table.add_column("Confidence", width=10)
-        table.add_column("Source", width=10)
-        table.add_column("Vulnerable", width=10)
+        table.add_column("Source", width=14)
+        table.add_column("CVEs", min_width=10)
 
         for tech in port_techs:
-            if tech.is_vulnerable:
-                vuln_str = f"[bold red]🔴 YES[/]"
-            else:
-                vuln_str = "[green]—[/]"
+            cat_icon = _CATEGORY_ICONS.get(tech.category, "❓")
 
             category_style = {
                 "language": "bold yellow",
@@ -361,19 +394,28 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
                 "os": "white",
             }.get(tech.category, "white")
 
+            if tech.is_vulnerable:
+                cves = ", ".join(tech.cves)
+                cve_str = f"[bold red]{cves}[/]"
+                row_icon = f"{cat_icon}🔴"
+            else:
+                cve_str = "[dim]—[/]"
+                row_icon = cat_icon
+
             table.add_row(
+                row_icon,
                 tech.name,
                 tech.version or "—",
                 f"[{category_style}]{tech.category or '—'}[/]",
                 tech.confidence,
                 tech.source,
-                vuln_str,
+                cve_str,
             )
 
         console.print(table)
         console.print()
 
-    # Vulnerable techs alert
+    # Vulnerable techs alert panel
     vulnerable = [t for t in techs if t.is_vulnerable]
     if vulnerable:
         lines: list[str] = []
@@ -406,6 +448,9 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
 def display_findings_panel(findings: list[Finding]) -> None:
     """Display findings sorted by severity in a Rich panel.
 
+    Groups findings by severity level with count badges, and truncates
+    long descriptions for a cleaner display.
+
     Parameters
     ----------
     findings:
@@ -418,16 +463,30 @@ def display_findings_panel(findings: list[Finding]) -> None:
     console = get_console()
     sorted_findings = sorted(findings, key=lambda f: f.severity.rank)
 
+    # Group by severity for structured display
     lines: list[str] = []
+    current_sev: Severity | None = None
+
     for finding in sorted_findings:
-        style = finding.severity.rich_style
-        icon = finding.severity.icon
+        # Add severity group header when severity changes
+        if finding.severity != current_sev:
+            current_sev = finding.severity
+            count = sum(1 for f in sorted_findings if f.severity == current_sev)
+            style = current_sev.rich_style
+            icon = current_sev.icon
+            lines.append(
+                f"  [{style}]{icon} {current_sev.value} ({count} findings)[/]"
+            )
+            lines.append(f"  [{'─' * 40}]")
+
         cve_tag = f" [dim]({finding.cve})[/]" if finding.cve else ""
+        desc = _truncate(finding.description, 100)
+        module_tag = f"[dim][{finding.module}][/]"
         lines.append(
-            f"  {icon} [{style}][{finding.severity.value}][/] "
-            f"[bold]{finding.title}[/]{cve_tag} — "
-            f"{finding.description}"
+            f"    [bold]{finding.title}[/]{cve_tag} {module_tag}"
         )
+        if desc and desc != finding.title:
+            lines.append(f"    [dim]{desc}[/]")
 
     content = "\n".join(lines)
     panel = Panel(
@@ -476,7 +535,11 @@ def display_next_steps(findings: list[Finding]) -> None:
 
     lines: list[str] = []
     for i, cmd in enumerate(commands, 1):
-        lines.append(f"  [bold bright_cyan]{i}.[/]  {cmd}")
+        # Highlight comments differently from actual commands
+        if cmd.startswith("#"):
+            lines.append(f"  [bold bright_cyan]{i}.[/]  [dim italic]{cmd}[/]")
+        else:
+            lines.append(f"  [bold bright_cyan]{i}.[/]  [bright_green]{cmd}[/]")
 
     content = "\n".join(lines)
     panel = Panel(
@@ -502,6 +565,9 @@ _LOOT_ICONS: dict[str, str] = {
     "kerberos": "🎫",
     "certificates": "📜",
     "configs": "📝",
+    "credentials": "🗝️",
+    "flags": "🚩",
+    "keys": "🔐",
 }
 
 
@@ -545,8 +611,12 @@ def display_loot_summary(loot_counts: dict[str, int]) -> None:
 
 
 def display_attack_paths(state: ScanState) -> None:
-    """Display context-aware attack path suggestions."""
+    """Display context-aware attack path suggestions.
+
+    Commands are categorized into recon vs. exploitation for clarity.
+    """
     from recon_ninja.core.report import _generate_attack_paths, _deduplicated_commands
+
     console = get_console()
 
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
@@ -557,9 +627,18 @@ def display_attack_paths(state: ScanState) -> None:
         console.print("[dim]No suggested attack paths.[/]")
         return
 
-    lines = []
+    lines: list[str] = []
     for i, cmd in enumerate(all_cmds[:15], 1):
-        lines.append(f"  [bold bright_cyan]{i:2d}.[/]  {cmd}")
+        # Style comments vs commands differently
+        if cmd.startswith("#"):
+            lines.append("")
+            lines.append(
+                f"  [bold bright_yellow]{cmd}[/]"
+            )
+        else:
+            lines.append(
+                f"  [bold bright_cyan]{i:2d}.[/]  [bright_green]{cmd}[/]"
+            )
 
     content = "\n".join(lines)
     panel = Panel(
@@ -664,11 +743,27 @@ def _display_footer(state: ScanState) -> None:
     # Output directory
     output_dir = state.output_dir
 
+    # Tech count
+    tech_count = len(state.detected_techs)
+    vuln_tech_count = len(state.vulnerable_techs())
+
+    # Hostnames
+    hostname_str = ", ".join(state.hostnames[:3]) if state.hostnames else "—"
+
     footer_text = (
-        f"  [bold]Output[/]    {output_dir}\n"
-        f"  [bold]Duration[/]  {mins}m {secs}s\n"
-        f"  [bold]Modules[/]   {len(state.completed_modules)} completed\n"
-        f"  [bold]Findings[/]  {severity_line}\n\n"
+        f"  [bold]Target[/]      {state.target}\n"
+        f"  [bold]Hostname[/]    {hostname_str}\n"
+        f"  [bold]Output[/]      {output_dir}\n"
+        f"  [bold]Duration[/]    {mins}m {secs}s\n"
+        f"  [bold]Modules[/]     {len(state.completed_modules)} completed\n"
+        f"  [bold]Tech Stack[/]  {tech_count} detected"
+        + (
+            f"  [bold red]({vuln_tech_count} vulnerable)[/]"
+            if vuln_tech_count
+            else ""
+        )
+        + "\n"
+        f"  [bold]Findings[/]    {severity_line}\n\n"
         f"  [dim]Reports: {output_dir}/00_SUMMARY.md  "
         f"{output_dir}/00_findings.json[/]"
     )

@@ -14,15 +14,11 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
 
-from rich.console import Console as RichConsole
-
 from recon_ninja.core.display import (
     display_phase_header,
     display_port_table,
     display_box_profile,
-    display_findings_panel,
     display_loot_summary,
-    display_scan_summary,
     get_console,
 )
 from recon_ninja.core.models import (
@@ -32,7 +28,6 @@ from recon_ninja.core.models import (
     ScanState,
     ServiceInfo,
     Severity,
-    TechInfo,
 )
 from recon_ninja.core.runner import run_multiple, run_tool
 
@@ -469,8 +464,6 @@ class ReconEngine:
                 console.print(f"  [dim]▸[/] Running [bold]{name}[/] module...")
 
         semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        results: list[ModuleResult] = []
-
         async def _run_module(name: str, func: Callable[..., Any]) -> ModuleResult:
             """Execute a single module inside the semaphore, catching errors."""
             async with semaphore:
@@ -859,7 +852,6 @@ class ReconEngine:
                 )
 
         if not self.quiet:
-            console = get_console()
             loot_counts = {}
             for result in self.state.module_results:
                 if result.module_name == "loot" and result.findings:

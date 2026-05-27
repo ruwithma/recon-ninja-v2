@@ -100,7 +100,6 @@ async def run_winrm_module(
             if rc == 0 and stdout:
                 # Determine the transport protocol
                 transport = "HTTPS" if port == WINRM_HTTPS_PORT else "HTTP"
-                scheme = "https" if port == WINRM_HTTPS_PORT else "http"
 
                 # Extract auth type from nmap output
                 auth_match = re.search(

@@ -12,7 +12,6 @@ aggregated into a single combined result with ``module_name="web"``.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from pathlib import Path

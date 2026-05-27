@@ -97,9 +97,8 @@ def _determine_extensions(state: ScanState, port: int) -> str:
     """
     svc = state.services.get(port)
 
-    # Check product / service for IIS
+    # Check product for IIS
     product = (svc.product.lower() if svc else "") or ""
-    service = (svc.service.lower() if svc else "") or ""
 
     # Check findings from web_core for tech stack hints
     tech_stack: set[str] = set()
@@ -462,16 +461,8 @@ async def run_web_dirfuzz(
     # 3. Common path probing (async HEAD requests)
     # ------------------------------------------------------------------
     if shutil.which("curl"):
-        check_tasks = [
-            _check_path(url, path, default_sev)
-            for path, default_sev in COMMON_PATHS
-            # Skip "/" baseline and "/robots.txt" (already done in web_core)
-            if path not in ("/", "/robots.txt")
-        ]
-
         # Run HEAD checks concurrently (bounded)
         semaphore = asyncio.Semaphore(10)
-        results: list[Finding | None] = []
 
         async def _bounded_check(
             u: str, p: str, s: Severity,

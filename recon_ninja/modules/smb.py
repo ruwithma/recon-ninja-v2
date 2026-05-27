@@ -53,7 +53,6 @@ async def run_smb_module(
     """
     findings: list[Finding] = []
     raw_outputs: list[str] = []
-    suggested_cmds: list[str] = []
 
     # Quick check — if no SMB ports, skip
     if not _is_smb_port(state):
