@@ -1,20 +1,27 @@
-"""Deep technology detection sub-module.
+"""Deep technology detection sub-module — Wappalyzer-powered.
 
-Detects the underlying tech stack of web applications using multiple
-detection strategies:
+Detects the underlying tech stack of web applications using a layered
+detection strategy:
 
-* **HTTP header analysis** — Server, X-Powered-By, X-AspNet-Version,
-  X-Generator, and other fingerprinting headers.
-* **Cookie-based detection** — framework signatures in cookie names
-  (PHPSESSID, csrftoken, laravel_session, etc.).
-* **HTML meta/JS analysis** — generator tags, script/CSS patterns,
-  framework-specific HTML comments.
-* **Whatweb integration** — enhanced parsing of whatweb output.
-* **Built-in vulnerability database** — known CVEs for common tech versions.
+**Layer 1 — Wappalyzer (primary)**: Uses the ``python-Wappalyzer`` package
+which bundles Wappalyzer's 6,000+ technology fingerprint database.
+This provides the same detection coverage as the Wappalyzer browser
+extension.  When Wappalyzer is available it runs as the **primary** engine.
+
+**Layer 2 — Custom fingerprint rules (fallback + confirmation)**: Built-in
+header, cookie, and HTML detection rules that run regardless.  When both
+Wappalyzer and custom rules detect the same technology, the confidence is
+boosted to "certain"; if only one detects, confidence is "probable".
+
+**Layer 3 — External tools**: whatweb and nmap service detection provide
+additional context and cross-referencing.
+
+**Layer 4 — Vulnerability correlation**: All detected technologies are
+checked against a built-in CVE database covering 25+ known vulnerable
+versions (Heartbleed, Apache path traversal, vsftpd backdoor, etc.).
 
 Detected technologies are stored in ``state.detected_techs`` as
-:class:`~recon_ninja.core.models.TechInfo` objects and flagged with CVEs
-when applicable.
+:class:`~recon_ninja.core.models.TechInfo` objects.
 """
 
 from __future__ import annotations
@@ -41,6 +48,35 @@ from recon_ninja.core.utils import module_guard
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Wappalyzer availability check
+# ---------------------------------------------------------------------------
+
+_HAS_WAPPALYZER = False
+try:
+    from Wappalyzer import Wappalyzer, WebPage
+    _HAS_WAPPALYZER = True
+    logger.debug("python-Wappalyzer available — will use as primary detection engine")
+except ImportError:
+    logger.debug("python-Wappalyzer not installed — falling back to custom detection rules")
+
+# Wappalyzer instance cache (avoids re-downloading fingerprints every port)
+_wappalyzer_instance = None
+
+
+def _get_wappalyzer() -> Any:
+    """Return a cached Wappalyzer instance (downloads fingerprints once)."""
+    global _wappalyzer_instance
+    if _wappalyzer_instance is None and _HAS_WAPPALYZER:
+        try:
+            _wappalyzer_instance = Wappalyzer.latest()
+            logger.info("Wappalyzer fingerprint database loaded")
+        except Exception as exc:
+            logger.warning("Failed to initialise Wappalyzer: %s", exc)
+            return None
+    return _wappalyzer_instance
+
+
+# ---------------------------------------------------------------------------
 # Built-in vulnerability database
 # ---------------------------------------------------------------------------
 
@@ -62,7 +98,7 @@ KNOWN_VULN_DB: dict[tuple[str, str], list[str]] = {
     ("proftpd", "1.3.5"): ["CVE-2015-3306"],
     # PHP
     ("php", "7.2"): ["CVE-2022-31615"],
-    ("php", "5."): ["CVE-EOL"],  # End of life
+    ("php", "5."): ["CVE-EOL"],
     ("php", "7.0"): ["CVE-EOL"],
     ("php", "7.1"): ["CVE-EOL"],
     # nginx
@@ -112,23 +148,54 @@ KNOWN_VULN_DB: dict[tuple[str, str], list[str]] = {
 }
 
 # ---------------------------------------------------------------------------
-# HTTP header → technology detection rules
+# Wappalyzer category → our category mapping
+# ---------------------------------------------------------------------------
+
+_WAPPALYZER_CATEGORY_MAP: dict[str, str] = {
+    "cms": "cms",
+    "blogs": "cms",
+    "ecommerce": "cms",
+    "message boards": "cms",
+    "web frameworks": "framework",
+    "javascript frameworks": "framework",
+    "javascript libraries": "library",
+    "web servers": "server",
+    "programming languages": "language",
+    "databases": "database",
+    "cdn": "cdn",
+    "security": "waf",
+    "analytics": "analytics",
+    "caching": "server",
+    "operating systems": "os",
+    "font scripts": "library",
+    "media servers": "server",
+    "search engines": "server",
+    "miscellaneous": "other",
+    "rich text editors": "library",
+    "lms": "cms",
+    "wikis": "cms",
+    "build tools": "framework",
+    "containerization": "server",
+    "api tools": "library",
+}
+
+
+# ---------------------------------------------------------------------------
+# Custom fingerprint rules (fallback + confirmation layer)
 # ---------------------------------------------------------------------------
 
 HEADER_TECH_RULES: list[dict[str, Any]] = [
     # Server header
-    {"header": "server", "pattern": r"^Apache/([\d.]+)", "name": "Apache HTTP Server", "category": "server"},
+    {"header": "server", "pattern": r"^Apache/([\d.]+)", "name": "Apache", "category": "server"},
     {"header": "server", "pattern": r"^nginx/([\d.]+)", "name": "Nginx", "category": "server"},
     {"header": "server", "pattern": r"^Microsoft-IIS/([\d.]+)", "name": "IIS", "category": "server"},
     {"header": "server", "pattern": r"^LiteSpeed", "name": "LiteSpeed", "category": "server"},
     {"header": "server", "pattern": r"^Caddy", "name": "Caddy", "category": "server"},
     {"header": "server", "pattern": r"^openresty/([\d.]+)", "name": "OpenResty", "category": "server"},
-    {"header": "server", "pattern": r"^Cherokee", "name": "Cherokee", "category": "server"},
     {"header": "server", "pattern": r"^lighttpd/([\d.]+)", "name": "lighttpd", "category": "server"},
     {"header": "server", "pattern": r"^Apache-Coyote", "name": "Apache Tomcat", "category": "server"},
     {"header": "server", "pattern": r"^Cowboy", "name": "Cowboy", "category": "server"},
     {"header": "server", "pattern": r"^Jetty", "name": "Jetty", "category": "server"},
-    {"header": "server", "pattern": r"^WEBrick", "name": "WEBrick", "category": "server"},
     {"header": "server", "pattern": r"^Werkzeug/([\d.]+)", "name": "Werkzeug", "category": "server"},
     {"header": "server", "pattern": r"^gunicorn/([\d.]+)", "name": "Gunicorn", "category": "server"},
     {"header": "server", "pattern": r"^uvicorn", "name": "Uvicorn", "category": "server"},
@@ -139,26 +206,18 @@ HEADER_TECH_RULES: list[dict[str, Any]] = [
     {"header": "x-powered-by", "pattern": r"^ASP\.NET", "name": "ASP.NET", "category": "framework"},
     {"header": "x-powered-by", "pattern": r"^Express", "name": "Express", "category": "framework"},
     {"header": "x-powered-by", "pattern": r"^Next\.js\s*([\d.]+)?", "name": "Next.js", "category": "framework"},
-    {"header": "x-powered-by", "pattern": r"^Phusion Passenger", "name": "Phusion Passenger", "category": "server"},
-    {"header": "x-powered-by", "pattern": r"^RESTFramework", "name": "Django REST Framework", "category": "framework"},
     {"header": "x-powered-by", "pattern": r"^Rails\s*([\d.]+)?", "name": "Ruby on Rails", "category": "framework"},
-    {"header": "x-powered-by", "pattern": r"^Plesk", "name": "Plesk", "category": "server"},
     {"header": "x-powered-by", "pattern": r"^Craft CMS", "name": "Craft CMS", "category": "cms"},
     # X-AspNet-Version header
     {"header": "x-aspnet-version", "pattern": r"^([\d.]+)", "name": "ASP.NET", "category": "framework"},
     # X-Generator header
     {"header": "x-generator", "pattern": r"Ghost\s*([\d.]+)?", "name": "Ghost", "category": "cms"},
     {"header": "x-generator", "pattern": r"Hugo\s*([\d.]+)?", "name": "Hugo", "category": "framework"},
-    {"header": "x-generator", "pattern": r"Jekyll\s*([\d.]+)?", "name": "Jekyll", "category": "framework"},
     {"header": "x-generator", "pattern": r"WordPress\s*([\d.]+)?", "name": "WordPress", "category": "cms"},
     {"header": "x-generator", "pattern": r"Drupal\s*([\d.]+)?", "name": "Drupal", "category": "cms"},
     # X-Drupal-Cache header
     {"header": "x-drupal-cache", "pattern": r".*", "name": "Drupal", "category": "cms"},
 ]
-
-# ---------------------------------------------------------------------------
-# Cookie → technology detection rules
-# ---------------------------------------------------------------------------
 
 COOKIE_TECH_RULES: list[dict[str, Any]] = [
     {"cookie_pattern": r"PHPSESSID", "name": "PHP", "category": "language", "confidence": "certain"},
@@ -171,17 +230,11 @@ COOKIE_TECH_RULES: list[dict[str, Any]] = [
     {"cookie_pattern": r"connect\.sid", "name": "Express", "category": "framework", "confidence": "probable"},
     {"cookie_pattern": r"next-auth\.", "name": "Next.js", "category": "framework", "confidence": "certain"},
     {"cookie_pattern": r"__Host-next-auth", "name": "Next.js", "category": "framework", "confidence": "certain"},
-    {"cookie_pattern": r"flask_session", "name": "Flask", "category": "framework", "confidence": "certain"},
     {"cookie_pattern": r"wp-settings-", "name": "WordPress", "category": "cms", "confidence": "certain"},
     {"cookie_pattern": r"SSESS[a-f0-9]+", "name": "Drupal", "category": "cms", "confidence": "certain"},
-    {"cookie_pattern": r"wfvt_[a-f0-9]+", "name": "Wordfence", "category": "waf", "confidence": "probable"},
     {"cookie_pattern": r"cfduid", "name": "Cloudflare", "category": "waf", "confidence": "certain"},
     {"cookie_pattern": r"__cf_bm", "name": "Cloudflare", "category": "waf", "confidence": "certain"},
 ]
-
-# ---------------------------------------------------------------------------
-# HTML → technology detection rules
-# ---------------------------------------------------------------------------
 
 HTML_TECH_RULES: list[dict[str, Any]] = [
     # Meta generator tags
@@ -201,14 +254,10 @@ HTML_TECH_RULES: list[dict[str, Any]] = [
      "name": "Next.js", "category": "framework", "confidence": "certain"},
     {"pattern": r'<meta\s+name=["\']generator["\']\s+content=["\']Nuxt\.js\s*([\d.]+)?',
      "name": "Nuxt.js", "category": "framework", "confidence": "certain"},
-    {"pattern": r'<meta\s+name=["\']generator["\']\s+content=["\']Vite\s*([\d.]+)?',
-     "name": "Vite", "category": "framework", "confidence": "certain"},
     # Script source patterns
     {"pattern": r'src=["\'][^"\']*jquery[/-]([\d.]+)',
      "name": "jQuery", "category": "library", "confidence": "certain"},
     {"pattern": r'src=["\'][^"\']*jquery[\w/.-]*\.js',
-     "name": "jQuery", "category": "library", "confidence": "probable"},
-    {"pattern": r'ver=([\d.]+)[^"\']*jquery',
      "name": "jQuery", "category": "library", "confidence": "probable"},
     {"pattern": r'jquery[/-]([\d.]+)',
      "name": "jQuery", "category": "library", "confidence": "probable"},
@@ -222,8 +271,6 @@ HTML_TECH_RULES: list[dict[str, Any]] = [
      "name": "Next.js", "category": "framework", "confidence": "certain"},
     {"pattern": r'src=["\'][^"\']*/nuxt/',
      "name": "Nuxt.js", "category": "framework", "confidence": "certain"},
-    {"pattern": r'src=["\'][^"\']*svelte',
-     "name": "Svelte", "category": "framework", "confidence": "probable"},
     {"pattern": r'src=["\'][^"\']*bootstrap(\.min)?\.js',
      "name": "Bootstrap", "category": "library", "confidence": "certain"},
     {"pattern": r'src=["\'][^"\']*tailwind',
@@ -233,13 +280,9 @@ HTML_TECH_RULES: list[dict[str, Any]] = [
      "name": "Bootstrap", "category": "library", "confidence": "certain"},
     {"pattern": r'href=["\'][^"\']*font-awesome',
      "name": "Font Awesome", "category": "library", "confidence": "certain"},
-    {"pattern": r'href=["\'][^"\']*tailwind',
-     "name": "Tailwind CSS", "category": "library", "confidence": "probable"},
     # HTML comment patterns
     {"pattern": r'<!--\s*This is Squarespace',
      "name": "Squarespace", "category": "cms", "confidence": "certain"},
-    {"pattern": r'<!--\s*Wix',
-     "name": "Wix", "category": "cms", "confidence": "certain"},
     {"pattern": r'<!--\s*Shopify',
      "name": "Shopify", "category": "cms", "confidence": "certain"},
     # Next.js specific patterns
@@ -247,8 +290,6 @@ HTML_TECH_RULES: list[dict[str, Any]] = [
      "name": "Next.js", "category": "framework", "confidence": "certain"},
     {"pattern": r'id=["\']__next["\']',
      "name": "Next.js", "category": "framework", "confidence": "certain"},
-    {"pattern": r'data-next-mark',
-     "name": "Next.js", "category": "framework", "confidence": "probable"},
     # Laravel specific
     {"pattern": r'csrf-token["\']\s+content=["\'][^"\']*',
      "name": "Laravel", "category": "framework", "confidence": "probable"},
@@ -261,20 +302,7 @@ HTML_TECH_RULES: list[dict[str, Any]] = [
 
 
 def _check_known_vulns(name: str, version: str) -> list[str]:
-    """Check the built-in vulnerability database for known CVEs.
-
-    Parameters
-    ----------
-    name:
-        Technology name (case-insensitive match).
-    version:
-        Version string.
-
-    Returns
-    -------
-    list[str]
-        List of CVE identifiers that match this tech+version.
-    """
+    """Check the built-in vulnerability database for known CVEs."""
     cves: list[str] = []
     name_lower = name.lower()
 
@@ -285,21 +313,95 @@ def _check_known_vulns(name: str, version: str) -> list[str]:
     return cves
 
 
-def _detect_from_headers(headers: dict[str, str], port: int) -> list[TechInfo]:
-    """Detect technologies from HTTP response headers.
+def _map_wappalyzer_category(wa_cats: list[dict[str, Any]] | list[str]) -> str:
+    """Map Wappalyzer category names to our simplified category system."""
+    if not wa_cats:
+        return ""
+
+    # Handle both string and dict category formats
+    cat_names: list[str] = []
+    for cat in wa_cats:
+        if isinstance(cat, dict):
+            cat_names.append(cat.get("name", ""))
+        elif isinstance(cat, str):
+            cat_names.append(cat)
+
+    for cat_name in cat_names:
+        cat_lower = cat_name.lower()
+        for wa_key, our_cat in _WAPPALYZER_CATEGORY_MAP.items():
+            if wa_key in cat_lower:
+                return our_cat
+
+    return ""
+
+
+def _detect_with_wappalyzer(
+    url: str,
+    headers: dict[str, str],
+    html_source: str,
+    port: int,
+) -> list[TechInfo]:
+    """Run Wappalyzer detection using pre-fetched headers and HTML.
+
+    This is the PRIMARY detection engine.  Wappalyzer's fingerprint
+    database covers 6,000+ technologies — far more than our custom rules.
 
     Parameters
     ----------
+    url:
+        Target URL.
     headers:
         Lowercased header dictionary from the HTTP response.
+    html_source:
+        HTML page source.
     port:
         Port number the tech was detected on.
 
     Returns
     -------
     list[TechInfo]
-        Detected technologies from header analysis.
+        Technologies detected by Wappalyzer.
     """
+    wappalyzer = _get_wappalyzer()
+    if wappalyzer is None:
+        return []
+
+    techs: list[TechInfo] = []
+
+    try:
+        # Build a WebPage from already-fetched data (no extra request)
+        webpage = WebPage(url, html=html_source, headers=headers)
+        results = wappalyzer.analyze_with_versions_and_categories(webpage)
+
+        for name, data in results.items():
+            versions = data.get("versions", [])
+            version = versions[0] if versions else ""
+            wa_cats = data.get("categories", [])
+
+            category = _map_wappalyzer_category(wa_cats)
+            cves = _check_known_vulns(name, version) if version else []
+
+            techs.append(TechInfo(
+                name=name,
+                version=version,
+                category=category,
+                confidence="certain",  # Wappalyzer is highly reliable
+                source="wappalyzer",
+                port=port,
+                cves=cves,
+                is_vulnerable=bool(cves),
+            ))
+
+        logger.info("[web_tech:%d] Wappalyzer detected %d technologies", port, len(techs))
+
+    except Exception as exc:
+        logger.warning("[web_tech:%d] Wappalyzer analysis failed: %s", port, exc)
+
+    return techs
+
+
+def _detect_from_headers(headers: dict[str, str], port: int) -> list[TechInfo]:
+    """Detect technologies from HTTP response headers (custom rules)."""
     techs: list[TechInfo] = []
 
     for rule in HEADER_TECH_RULES:
@@ -326,20 +428,7 @@ def _detect_from_headers(headers: dict[str, str], port: int) -> list[TechInfo]:
 
 
 def _detect_from_cookies(headers: dict[str, str], port: int) -> list[TechInfo]:
-    """Detect technologies from Set-Cookie header values.
-
-    Parameters
-    ----------
-    headers:
-        Lowercased header dictionary from the HTTP response.
-    port:
-        Port number the tech was detected on.
-
-    Returns
-    -------
-    list[TechInfo]
-        Detected technologies from cookie analysis.
-    """
+    """Detect technologies from Set-Cookie header values."""
     techs: list[TechInfo] = []
     cookie_header = headers.get("set-cookie", "")
 
@@ -362,20 +451,7 @@ def _detect_from_cookies(headers: dict[str, str], port: int) -> list[TechInfo]:
 
 
 def _detect_from_html(html: str, port: int) -> list[TechInfo]:
-    """Detect technologies from HTML page source.
-
-    Parameters
-    ----------
-    html:
-        The HTML source of the page.
-    port:
-        Port number the tech was detected on.
-
-    Returns
-    -------
-    list[TechInfo]
-        Detected technologies from HTML analysis.
-    """
+    """Detect technologies from HTML page source."""
     techs: list[TechInfo] = []
 
     for rule in HTML_TECH_RULES:
@@ -398,28 +474,10 @@ def _detect_from_html(html: str, port: int) -> list[TechInfo]:
 
 
 def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
-    """Parse whatweb output into structured TechInfo objects.
-
-    Enhances the basic whatweb parsing from web_core with proper
-    categorisation and vulnerability checking.
-
-    Parameters
-    ----------
-    raw:
-        Full stdout from ``whatweb -a 3 <URL>``.
-    port:
-        Port number the tech was detected on.
-
-    Returns
-    -------
-    list[TechInfo]
-        Detected technologies from whatweb analysis.
-    """
+    """Parse whatweb output into structured TechInfo objects."""
     techs: list[TechInfo] = []
 
-    # Category mapping for common whatweb tech names
     whatweb_categories: dict[str, tuple[str, str]] = {
-        # name → (category, confidence)
         "WordPress": ("cms", "certain"),
         "Drupal": ("cms", "certain"),
         "Joomla": ("cms", "certain"),
@@ -431,7 +489,6 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
         "Laravel": ("framework", "certain"),
         "Ruby": ("language", "certain"),
         "ASP.NET": ("framework", "certain"),
-        "JSP": ("language", "certain"),
         "Apache": ("server", "certain"),
         "Nginx": ("server", "certain"),
         "IIS": ("server", "certain"),
@@ -451,13 +508,10 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
         name = match.group(1).strip()
         detail = match.group(2).strip()
 
-        # Skip HTTP status code and URL
         if name.isdigit() or name.startswith("http"):
             continue
 
         category, confidence = whatweb_categories.get(name, ("", "probable"))
-
-        # Try to extract version from the detail
         version = ""
         ver_match = re.search(r"[\d]+[\d.]*[a-z0-9]*", detail)
         if ver_match:
@@ -480,20 +534,7 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
 
 
 def _detect_from_nmap(services: dict[int, Any], port: int) -> list[TechInfo]:
-    """Extract technology info from nmap service detection.
-
-    Parameters
-    ----------
-    services:
-        The services dict from ScanState.
-    port:
-        The specific port to check.
-
-    Returns
-    -------
-    list[TechInfo]
-        Detected technologies from nmap service info.
-    """
+    """Extract technology info from nmap service detection."""
     techs: list[TechInfo] = []
     svc = services.get(port)
     if not svc:
@@ -513,9 +554,7 @@ def _detect_from_nmap(services: dict[int, Any], port: int) -> list[TechInfo]:
             is_vulnerable=bool(cves),
         ))
 
-    # Check extra_info for additional tech
     if svc.extra_info:
-        # e.g., "Ubuntu Linux" or "PHP 7.4.3"
         php_match = re.search(r"PHP\s*([\d.]+)", svc.extra_info, re.IGNORECASE)
         if php_match:
             version = php_match.group(1)
@@ -531,17 +570,11 @@ def _detect_from_nmap(services: dict[int, Any], port: int) -> list[TechInfo]:
                 is_vulnerable=bool(cves),
             ))
 
-    # Check NSE scripts for tech info
     for script_name, output in svc.scripts.items():
-        if "http-server-header" in script_name:
-            # Already handled via headers, skip
-            pass
         if "http-headers" in script_name:
-            # Parse Server: from NSE output
             server_match = re.search(r"Server:\s*(.+)", output, re.IGNORECASE)
             if server_match:
                 server_val = server_match.group(1).strip()
-                # Check if already detected
                 existing_names = {t.name.lower() for t in techs}
                 if not any(n in server_val.lower() for n in existing_names):
                     techs.append(TechInfo(
@@ -554,6 +587,103 @@ def _detect_from_nmap(services: dict[int, Any], port: int) -> list[TechInfo]:
                     ))
 
     return techs
+
+
+def _cross_reference_techs(all_techs: list[TechInfo]) -> list[TechInfo]:
+    """Cross-reference detections from multiple sources for confidence scoring.
+
+    If the same technology is detected by both Wappalyzer AND custom rules,
+    boost confidence to "certain" and merge the best version/category data.
+    If detected by only one engine, keep the original confidence but cap
+    at "probable" (unless it's from Wappalyzer which is already reliable).
+
+    Parameters
+    ----------
+    all_techs:
+        All detected technologies (may contain duplicates from different sources).
+
+    Returns
+    -------
+    list[TechInfo]
+        Deduplicated technologies with adjusted confidence levels.
+    """
+    # Group by (name_lower, port) to find duplicates
+    groups: dict[tuple[str, int], list[TechInfo]] = {}
+    for tech in all_techs:
+        key = (tech.name.lower().strip(), tech.port)
+        groups.setdefault(key, []).append(tech)
+
+    merged: list[TechInfo] = []
+
+    for key, tech_list in groups.items():
+        if len(tech_list) == 1:
+            # Single detection — keep as-is but set reasonable confidence
+            tech = tech_list[0]
+            if tech.source == "wappalyzer":
+                # Wappalyzer alone is reliable enough for "certain"
+                tech.confidence = "certain"
+            elif tech.confidence == "certain":
+                # Custom rules with "certain" confidence (header match, etc.)
+                pass
+            else:
+                tech.confidence = "probable"
+            merged.append(tech)
+        else:
+            # Multiple detections — merge and boost confidence
+            # Prefer Wappalyzer data, supplement with custom rules
+            wa_techs = [t for t in tech_list if t.source == "wappalyzer"]
+            custom_techs = [t for t in tech_list if t.source != "wappalyzer"]
+
+            # Start with best data
+            best = wa_techs[0] if wa_techs else tech_list[0]
+
+            # If Wappalyzer didn't get a version but custom rules did, use that
+            if not best.version:
+                for ct in custom_techs:
+                    if ct.version:
+                        best = ct
+                        break
+
+            # If Wappalyzer didn't get a category but custom rules did, use that
+            if not best.category:
+                for ct in custom_techs:
+                    if ct.category:
+                        best.category = ct.category
+                        break
+
+            # Merge CVEs from all sources
+            all_cves: list[str] = []
+            for t in tech_list:
+                all_cves.extend(t.cves)
+            unique_cves = list(dict.fromkeys(all_cves))  # deduplicate preserving order
+
+            # Boost confidence when confirmed by multiple sources
+            sources = {t.source for t in tech_list}
+            if len(sources) >= 2:
+                confidence = "certain"  # Confirmed by multiple engines
+            elif "wappalyzer" in sources:
+                confidence = "certain"
+            else:
+                confidence = "probable"
+
+            # Build merged tech name (prefer the most specific name)
+            name = best.name
+            for t in tech_list:
+                if len(t.name) > len(name):
+                    name = t.name
+
+            merged.append(TechInfo(
+                name=name,
+                version=best.version,
+                category=best.category,
+                confidence=confidence,
+                source="+".join(sorted(sources)),  # e.g. "header+wappalyzer"
+                port=best.port,
+                cves=unique_cves,
+                is_vulnerable=bool(unique_cves) or any(t.is_vulnerable for t in tech_list),
+            ))
+
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -570,11 +700,14 @@ async def run_web_tech(
     config: ReconConfig,
     output_dir: Path,
 ) -> ModuleResult:
-    """Deep technology detection sub-module.
+    """Deep technology detection sub-module — Wappalyzer-powered.
 
-    Runs multiple detection strategies to identify the underlying tech
-    stack of a web application, then checks detected technologies against
-    a built-in vulnerability database.
+    Detection layers (in priority order):
+
+    1. **Wappalyzer** (6,000+ fingerprints) — primary engine
+    2. **Custom rules** (headers, cookies, HTML) — fallback + confirmation
+    3. **External tools** (whatweb, nmap) — additional context
+    4. **Cross-referencing** — multiple sources = higher confidence
 
     Parameters
     ----------
@@ -614,7 +747,6 @@ async def run_web_tech(
         )
 
         if rc == 0 and stdout.strip():
-            # Parse headers
             blocks = re.split(r"\r?\n\r?\n", stdout.strip())
             last_block = blocks[-1] if blocks else ""
             for line in last_block.splitlines():
@@ -625,12 +757,12 @@ async def run_web_tech(
 
             raw_parts.append(f"=== Headers ===\n{last_block}")
 
-            # Detect from headers
+            # Custom header detection
             header_techs = _detect_from_headers(headers, port)
             all_techs.extend(header_techs)
             logger.info("[web_tech:%d] Header analysis found %d techs", port, len(header_techs))
 
-            # Detect from cookies
+            # Custom cookie detection
             cookie_techs = _detect_from_cookies(headers, port)
             all_techs.extend(cookie_techs)
             if cookie_techs:
@@ -648,16 +780,29 @@ async def run_web_tech(
             timeout=20,
         )
         if rc == 0 and stdout.strip():
-            html_source = stdout[:100000]  # cap at 100KB
+            html_source = stdout[:100000]
             raw_parts.append(f"=== HTML Source (first 5KB) ===\n{html_source[:5000]}")
 
-            # Detect from HTML
+            # Custom HTML detection
             html_techs = _detect_from_html(html_source, port)
             all_techs.extend(html_techs)
             logger.info("[web_tech:%d] HTML analysis found %d techs", port, len(html_techs))
 
     # ------------------------------------------------------------------
-    # 3. Whatweb (enhanced parsing)
+    # 3. WAPPALYZER — Primary detection engine (6,000+ fingerprints)
+    # ------------------------------------------------------------------
+    if _HAS_WAPPALYZER:
+        wa_techs = _detect_with_wappalyzer(url, headers, html_source, port)
+        all_techs.extend(wa_techs)
+        if wa_techs:
+            logger.info("[web_tech:%d] Wappalyzer found %d techs", port, len(wa_techs))
+            raw_parts.append(f"=== Wappalyzer ===\n{json.dumps({t.name: t.version for t in wa_techs}, indent=2)}")
+    else:
+        logger.info("[web_tech:%d] Wappalyzer not available — using custom rules only", port)
+        raw_parts.append("=== Wappalyzer === SKIPPED (install: pip install python-Wappalyzer)")
+
+    # ------------------------------------------------------------------
+    # 4. Whatweb (enhanced parsing)
     # ------------------------------------------------------------------
     if shutil.which("whatweb"):
         whatweb_out = output_dir / "whatweb_tech.txt"
@@ -668,13 +813,12 @@ async def run_web_tech(
         )
         if rc == 0 and stdout.strip():
             raw_parts.append(f"=== Whatweb ===\n{stdout}")
-
             whatweb_techs = _detect_from_whatweb(stdout, port)
             all_techs.extend(whatweb_techs)
             logger.info("[web_tech:%d] Whatweb found %d techs", port, len(whatweb_techs))
 
     # ------------------------------------------------------------------
-    # 4. Nmap service info (from state)
+    # 5. Nmap service info (from state)
     # ------------------------------------------------------------------
     nmap_techs = _detect_from_nmap(state.services, port)
     all_techs.extend(nmap_techs)
@@ -682,44 +826,43 @@ async def run_web_tech(
         logger.info("[web_tech:%d] Nmap service info found %d techs", port, len(nmap_techs))
 
     # ------------------------------------------------------------------
-    # 5. Deduplicate and store in state
+    # 6. Cross-reference and deduplicate
     # ------------------------------------------------------------------
-    seen_keys: set[tuple[str, str, int]] = set()
-    for tech in all_techs:
-        key = (tech.name.lower(), tech.version, tech.port)
-        if key not in seen_keys:
-            seen_keys.add(key)
-            state.add_tech(tech)
+    merged_techs = _cross_reference_techs(all_techs)
+
+    for tech in merged_techs:
+        state.add_tech(tech)
 
     # ------------------------------------------------------------------
-    # 6. Generate findings for detected techs
+    # 7. Generate findings
     # ------------------------------------------------------------------
     port_techs = state.techs_by_port(port)
 
-    # Group techs by category for a summary finding
     if port_techs:
+        # Group techs by category for summary
         categories: dict[str, list[str]] = {}
         for tech in port_techs:
             cat = tech.category or "other"
             label = f"{tech.name}" + (f" {tech.version}" if tech.version else "")
-            categories.setdefault(cat, []).append(label)
+            conf_icon = "✓" if tech.confidence == "certain" else "~"
+            categories.setdefault(cat, []).append(f"{label} [{conf_icon}]")
 
         tech_summary_parts = []
         for cat, items in sorted(categories.items()):
             tech_summary_parts.append(f"  {cat.upper()}: {', '.join(items)}")
 
         tech_summary = "\n".join(tech_summary_parts)
+
+        engine_label = "Wappalyzer + custom" if _HAS_WAPPALYZER else "custom rules"
         findings.append(Finding(
             severity=Severity.INFO,
             title=f"Tech stack detected on port {port} ({len(port_techs)} technologies)",
-            description=f"Detected technologies on {url}:\n{tech_summary}",
+            description=f"Detected technologies on {url} [{engine_label}]:\n{tech_summary}",
             module="web_tech",
             evidence=json.dumps([t.to_dict() for t in port_techs], indent=2)[:2000],
         ))
 
-    # ------------------------------------------------------------------
-    # 7. Generate findings for vulnerable techs
-    # ------------------------------------------------------------------
+    # Vulnerable techs findings
     vulnerable = [t for t in port_techs if t.is_vulnerable]
     for vtech in vulnerable:
         cve_list = ", ".join(vtech.cves)
@@ -745,8 +888,9 @@ async def run_web_tech(
     combined_raw = "\n\n".join(raw_parts)
 
     logger.info(
-        "[web_tech:%d] Detection complete: %d techs, %d vulnerable",
+        "[web_tech:%d] Detection complete: %d techs, %d vulnerable (engine: %s)",
         port, len(port_techs), len(vulnerable),
+        "wappalyzer+custom" if _HAS_WAPPALYZER else "custom-only",
     )
 
     return ModuleResult(

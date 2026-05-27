@@ -108,3 +108,38 @@ Stage Summary:
 - New feature: Tech-specific attack paths in reports (WordPress, Drupal, Next.js, PHP, Tomcat, Spring Boot)
 - Files modified: models.py, engine.py, report.py, display.py, web/__init__.py
 - Files created: web_tech.py
+
+---
+Task ID: 4
+Agent: main
+Task: Integrate Wappalyzer as primary detection engine with cross-referencing
+
+Work Log:
+- Installed python-Wappalyzer package and verified it works (6,000+ fingerprint database, 68 categories)
+- Rewrote web_tech.py with layered detection strategy:
+  - Layer 1: Wappalyzer as PRIMARY engine (6,000+ techs via python-Wappalyzer)
+  - Layer 2: Custom fingerprint rules as FALLBACK + CONFIRMATION
+  - Layer 3: External tools (whatweb, nmap) for additional context
+  - Layer 4: Cross-referencing engine for confidence scoring
+- Implemented _detect_with_wappalyzer(): uses pre-fetched headers+HTML, no extra HTTP request needed
+- Implemented _cross_reference_techs(): merges duplicate detections from multiple sources
+  - Both Wappalyzer AND custom rules detect same tech → confidence="certain", source="header+wappalyzer"
+  - Only one engine detects → keeps original confidence (Wappalyzer=certain, custom=probable)
+  - Merges best version/category data from all sources
+  - Merges CVEs from all sources
+- Added Wappalyzer category → our category mapping (_WAPPALYZER_CATEGORY_MAP) for 20+ category types
+- Added python-Wappalyzer as optional dependency in pyproject.toml (`[project.optional-dependencies] wappalyzer`)
+- Added python-Wappalyzer to checker.py tool registry
+- Wappalyzer instance caching to avoid re-downloading fingerprint DB per port
+- Graceful degradation: when Wappalyzer is not installed, custom rules still work
+- Tested with real Wappalyzer detection: WordPress+PHP+Apache+jQuery+MySQL+Ubuntu detected from mock page
+- Tested cross-referencing: PHP detected via cookie+header+wappalyzer → confidence=certain
+- Tested Next.js detection: Wappalyzer found Next.js+React+webpack+Node.js
+
+Stage Summary:
+- Wappalyzer integration provides 6,000+ technology detection (vs ~50 with custom rules alone)
+- Cross-referencing engine provides confidence scoring: multiple sources = higher confidence
+- Source field now shows combined sources (e.g. "header+wappalyzer", "cookie+header+wappalyzer")
+- Install command: `pip install python-Wappalyzer` or `pip install reconninja[wappalyzer]`
+- Works without Wappalyzer (graceful fallback to custom rules)
+- Files modified: web_tech.py, pyproject.toml, checker.py

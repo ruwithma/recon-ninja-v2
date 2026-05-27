@@ -341,6 +341,15 @@ TOOL_REGISTRY: list[ToolInfo] = [
         version_flag="--version",
         description="Joomla CMS vulnerability scanner",
     ),
+    ToolInfo(
+        name="python-Wappalyzer",
+        category="optional",
+        install_method="pip",
+        install_package="python-Wappalyzer",
+        alt_names=["Wappalyzer"],
+        version_flag="--version",
+        description="Wappalyzer tech detection engine (6,000+ fingerprints)",
+    ),
 ]
 
 
