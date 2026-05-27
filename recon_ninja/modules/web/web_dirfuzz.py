@@ -273,11 +273,11 @@ async def _check_path(
         rc, stdout, stderr = await run_tool(
             cmd=[
                 "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
-                "--connect-timeout", "5",
-                "--max-time", "8",
+                "--connect-timeout", "3",
+                "--max-time", "5",
                 full_url,
             ],
-            timeout=15,  # generous — curl's own --max-time handles the real limit
+            timeout=10,  # generous — curl's own --max-time handles the real limit
         )
         # stdout contains just the status code with -w
         status_str = stdout.strip()

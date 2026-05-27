@@ -353,6 +353,7 @@ class ReconEngine:
             scan_type,
             "--top-ports", top_ports,
             "-T4",
+            "--min-rate", "5000",
             *self.config.extra_nmap_flags,
             self.target,
         ]
@@ -421,6 +422,7 @@ class ReconEngine:
         cmd.extend([
             "-sC", "-sV",
             "-p", ports_str,
+            "--min-rate", "3000",
             "-oX", str(xml_out),
             *self.config.extra_nmap_flags,
             self.target,
@@ -592,7 +594,8 @@ class ReconEngine:
         """Run OSINT modules for domain targets.
 
         Skipped entirely when ``config.osint_enabled`` is ``False`` or when
-        the target does not appear to be a domain.
+        the target does not appear to be a domain.  All OSINT tools run
+        concurrently via :func:`run_multiple`.
         """
         if not self.config.osint_enabled:
             logger.info("OSINT phase disabled in config")
@@ -605,52 +608,57 @@ class ReconEngine:
         osint_target = self.state.primary_hostname or self.target
         logger.info("Running OSINT for %s", osint_target)
 
-        # --- DNS enumeration ---
+        # Build concurrent command list — all OSINT tools are independent
+        commands: list[tuple[str, list[str], Path | None]] = []
+
         if shutil.which("dnsrecon"):
-            cmd = [
+            commands.append((
                 "dnsrecon",
-                "-d", osint_target,
-                "-t", "std",
-                "-o", str(self.output_dir / "dnsrecon.json"),
-            ]
-            await run_tool(
-                cmd,
-                output_file=self.output_dir / "dnsrecon.txt",
-                timeout=self.config.default_timeout,
-            )
+                [
+                    "dnsrecon",
+                    "-d", osint_target,
+                    "-t", "std",
+                    "-o", str(self.output_dir / "dnsrecon.json"),
+                ],
+                self.output_dir / "dnsrecon.txt",
+            ))
         else:
             logger.debug("dnsrecon not found — skipping DNS OSINT")
 
-        # --- Subfinder ---
         if shutil.which("subfinder"):
-            cmd = [
+            commands.append((
                 "subfinder",
-                "-d", osint_target,
-                "-o", str(self.output_dir / "subfinder.txt"),
-                "-silent",
-            ]
-            await run_tool(
-                cmd,
-                output_file=self.output_dir / "subfinder.txt",
-                timeout=self.config.default_timeout,
-            )
+                [
+                    "subfinder",
+                    "-d", osint_target,
+                    "-o", str(self.output_dir / "subfinder.txt"),
+                    "-silent",
+                ],
+                self.output_dir / "subfinder.txt",
+            ))
         else:
             logger.debug("subfinder not found — skipping subdomain enum")
 
-        # --- theHarvester ---
         if shutil.which("theHarvester"):
-            cmd = [
+            commands.append((
                 "theHarvester",
-                "-d", osint_target,
-                "-b", "all",
-                "-f", str(self.output_dir / "harvester"),
-            ]
-            await run_tool(
-                cmd,
-                timeout=self.config.default_timeout,
-            )
+                [
+                    "theHarvester",
+                    "-d", osint_target,
+                    "-b", "all",
+                    "-f", str(self.output_dir / "harvester"),
+                ],
+                None,
+            ))
         else:
             logger.debug("theHarvester not found — skipping")
+
+        if commands:
+            await run_multiple(
+                commands,
+                max_concurrent=3,
+                timeout=self.config.default_timeout,
+            )
 
     # ------------------------------------------------------------------
     # Phase 5 — Vulnerability Correlation

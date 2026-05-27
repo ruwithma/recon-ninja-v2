@@ -739,49 +739,61 @@ async def run_web_tech(
     all_techs: list[TechInfo] = []
 
     # ------------------------------------------------------------------
-    # 1. Fetch headers via curl
+    # 1. Fetch headers via curl (reuse web_core's cached output if available)
     # ------------------------------------------------------------------
     headers: dict[str, str] = {}
-    if shutil.which("curl"):
+    cached_headers = output_dir / "curl_headers.txt"
+    header_raw = ""
+    if cached_headers.is_file():
+        # Reuse headers already fetched by web_core (avoids redundant HTTP round-trip)
+        logger.info("[web_tech:%d] Reusing cached headers from web_core", port)
+        header_raw = cached_headers.read_text(encoding="utf-8", errors="replace")
+    elif shutil.which("curl"):
         curl_out = output_dir / "curl_headers_tech.txt"
         rc, stdout, stderr = await run_tool(
             cmd=["curl", "-sI", "-L", "--max-redirs", "5", url],
             output_file=curl_out,
             timeout=config.default_timeout,
         )
+        if rc == 0:
+            header_raw = stdout
 
-        if rc == 0 and stdout.strip():
-            blocks = re.split(r"\r?\n\r?\n", stdout.strip())
-            last_block = blocks[-1] if blocks else ""
-            for line in last_block.splitlines():
-                if ":" not in line:
-                    continue
-                name, _, value = line.partition(":")
-                key = name.strip().lower()
-                val = value.strip()
-                if key in headers:
-                    headers[key] = f"{headers[key]}; {val}"
-                else:
-                    headers[key] = val
+    if header_raw.strip():
+        blocks = re.split(r"\r?\n\r?\n", header_raw.strip())
+        last_block = blocks[-1] if blocks else ""
+        for line in last_block.splitlines():
+            if ":" not in line:
+                continue
+            name, _, value = line.partition(":")
+            key = name.strip().lower()
+            val = value.strip()
+            if key in headers:
+                headers[key] = f"{headers[key]}; {val}"
+            else:
+                headers[key] = val
 
-            raw_parts.append(f"=== Headers ===\n{last_block}")
+        raw_parts.append(f"=== Headers ===\n{last_block}")
 
-            # Custom header detection
-            header_techs = _detect_from_headers(headers, port)
-            all_techs.extend(header_techs)
-            logger.info("[web_tech:%d] Header analysis found %d techs", port, len(header_techs))
+        # Custom header detection
+        header_techs = _detect_from_headers(headers, port)
+        all_techs.extend(header_techs)
+        logger.info("[web_tech:%d] Header analysis found %d techs", port, len(header_techs))
 
-            # Custom cookie detection
-            cookie_techs = _detect_from_cookies(headers, port)
-            all_techs.extend(cookie_techs)
-            if cookie_techs:
-                logger.info("[web_tech:%d] Cookie analysis found %d techs", port, len(cookie_techs))
+        # Custom cookie detection
+        cookie_techs = _detect_from_cookies(headers, port)
+        all_techs.extend(cookie_techs)
+        if cookie_techs:
+            logger.info("[web_tech:%d] Cookie analysis found %d techs", port, len(cookie_techs))
 
     # ------------------------------------------------------------------
-    # 2. Fetch HTML page source
+    # 2. Fetch HTML page source (not cached by web_core)
     # ------------------------------------------------------------------
     html_source = ""
-    if shutil.which("curl"):
+    cached_html = output_dir / "page_source.html"
+    if cached_html.is_file():
+        logger.info("[web_tech:%d] Reusing cached HTML source", port)
+        html_source = cached_html.read_text(encoding="utf-8", errors="replace")[:100000]
+    elif shutil.which("curl"):
         html_out = output_dir / "page_source.html"
         rc, stdout, stderr = await run_tool(
             cmd=["curl", "-sL", "--max-time", "15", url],
@@ -790,12 +802,12 @@ async def run_web_tech(
         )
         if rc == 0 and stdout.strip():
             html_source = stdout[:100000]
-            raw_parts.append(f"=== HTML Source (first 5KB) ===\n{html_source[:5000]}")
 
-            # Custom HTML detection
-            html_techs = _detect_from_html(html_source, port)
-            all_techs.extend(html_techs)
-            logger.info("[web_tech:%d] HTML analysis found %d techs", port, len(html_techs))
+    if html_source:
+        raw_parts.append(f"=== HTML Source (first 5KB) ===\n{html_source[:5000]}")
+        html_techs = _detect_from_html(html_source, port)
+        all_techs.extend(html_techs)
+        logger.info("[web_tech:%d] HTML analysis found %d techs", port, len(html_techs))
 
     # ------------------------------------------------------------------
     # 3. WAPPALYZER — Primary detection engine (6,000+ fingerprints)
@@ -811,9 +823,18 @@ async def run_web_tech(
         raw_parts.append("=== Wappalyzer === SKIPPED (install: pip install python-Wappalyzer)")
 
     # ------------------------------------------------------------------
-    # 4. Whatweb (enhanced parsing)
+    # 4. Whatweb (reuse web_core's cached output if available)
     # ------------------------------------------------------------------
-    if shutil.which("whatweb"):
+    cached_whatweb = output_dir / "whatweb.txt"
+    if cached_whatweb.is_file():
+        logger.info("[web_tech:%d] Reusing cached whatweb output from web_core", port)
+        whatweb_raw = cached_whatweb.read_text(encoding="utf-8", errors="replace")
+        if whatweb_raw.strip():
+            raw_parts.append(f"=== Whatweb (cached) ===\n{whatweb_raw}")
+            whatweb_techs = _detect_from_whatweb(whatweb_raw, port)
+            all_techs.extend(whatweb_techs)
+            logger.info("[web_tech:%d] Whatweb found %d techs", port, len(whatweb_techs))
+    elif shutil.which("whatweb"):
         whatweb_out = output_dir / "whatweb_tech.txt"
         rc, stdout, stderr = await run_tool(
             cmd=["whatweb", "-a", "3", "--color=never", url],

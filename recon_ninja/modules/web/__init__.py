@@ -2,9 +2,9 @@
 
 This is the entry point imported by :mod:`recon_ninja.core.engine`.  It
 iterates over every HTTP/HTTPS port discovered during Phase 2, constructs
-the appropriate URL, and then runs the sub-modules in sequence:
+the appropriate URL, and then runs the sub-modules:
 
-    web_core  →  web_dirfuzz  →  web_vuln  →  web_cms
+    web_core  →  web_tech  →  [web_dirfuzz | web_vuln | web_cms]  (concurrent)
 
 Each sub-module returns its own :class:`ModuleResult`.  All findings are
 aggregated into a single combined result with ``module_name="web"``.
@@ -12,6 +12,7 @@ aggregated into a single combined result with ``module_name="web"``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
@@ -49,6 +50,11 @@ async def _scan_port(
 ) -> list[ModuleResult]:
     """Execute the full sub-module pipeline for a single HTTP port.
 
+    Steps 1-2 (web_core, web_tech) run sequentially because web_tech
+    needs headers from web_core.  Steps 3-5 (web_dirfuzz, web_vuln,
+    web_cms) are independent and run **concurrently** via
+    ``asyncio.gather``.
+
     Parameters
     ----------
     target:
@@ -75,33 +81,44 @@ async def _scan_port(
     port_dir = output_dir / f"port_{port}"
     port_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1 — Core fingerprinting
+    # Step 1 — Core fingerprinting (must run first — fetches headers, hostnames)
     logger.info("[web:%d] Running web_core …", port)
     core_result = await run_web_core(target, port, url, state, config, port_dir)
     results.append(core_result)
 
-    # Step 2 — Deep technology detection
+    # Step 2 — Deep technology detection (needs headers from web_core)
     logger.info("[web:%d] Running web_tech …", port)
     tech_result = await run_web_tech(target, port, url, state, config, port_dir)
     results.append(tech_result)
 
-    # Step 3 — Directory / file fuzzing
-    logger.info("[web:%d] Running web_dirfuzz …", port)
-    dirfuzz_result = await run_web_dirfuzz(
-        target, port, url, hostname, state, config, port_dir,
+    # Steps 3-5 — Independent sub-modules run CONCURRENTLY
+    logger.info("[web:%d] Running web_dirfuzz + web_vuln + web_cms concurrently …", port)
+
+    async def _safe_run(name: str, coro):
+        """Wrap a sub-module call so exceptions don't cancel siblings."""
+        try:
+            return await coro
+        except Exception as exc:
+            logger.exception("[web:%d] %s failed: %s", port, name, exc)
+            return ModuleResult(
+                module_name=name,
+                status="error",
+                error_message=str(exc),
+            )
+
+    concurrent_results = await asyncio.gather(
+        _safe_run("web_dirfuzz", run_web_dirfuzz(
+            target, port, url, hostname, state, config, port_dir,
+        )),
+        _safe_run("web_vuln", run_web_vuln(
+            target, port, url, state, config, port_dir,
+        )),
+        _safe_run("web_cms", run_web_cms(
+            target, port, url, state, config, port_dir,
+        )),
     )
-    results.append(dirfuzz_result)
 
-    # Step 4 — Vulnerability scanning
-    logger.info("[web:%d] Running web_vuln …", port)
-    vuln_result = await run_web_vuln(target, port, url, state, config, port_dir)
-    results.append(vuln_result)
-
-    # Step 5 — CMS detection & API discovery
-    logger.info("[web:%d] Running web_cms …", port)
-    cms_result = await run_web_cms(target, port, url, state, config, port_dir)
-    results.append(cms_result)
-
+    results.extend(concurrent_results)
     return results
 
 
@@ -122,8 +139,8 @@ async def run_web_module(
     This function is the **top-level entry point** imported by
     :mod:`recon_ninja.core.engine`.  It filters the discovered services
     to those containing ``"http"``, then runs the sub-module pipeline
-    (web_core → web_dirfuzz → web_vuln → web_cms) for each qualifying
-    port.
+    for each qualifying port.  **Multiple ports are scanned concurrently**
+    (bounded to 2 at a time to avoid overloading the target).
 
     Parameters
     ----------
@@ -161,51 +178,70 @@ async def run_web_module(
     all_raw: list[str] = []
     any_error = False
 
-    for port in web_ports:
-        svc = state.services.get(port)
-        if svc is None:
-            logger.warning("No ServiceInfo for port %d — skipping", port)
-            continue
+    # --- Scan ports concurrently (bounded to 2 at a time) ---
+    port_semaphore = asyncio.Semaphore(2)
 
-        # Build URL; replace the placeholder "TARGET" in ServiceInfo.url
-        if svc.url:
-            url = svc.url.replace("TARGET", target)
-        else:
-            # Fallback: construct URL manually
-            scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
-            host = svc.hostname or target
-            url = f"{scheme}://{host}:{port}"
+    async def _scan_port_bounded(port: int) -> tuple[int, list[ModuleResult]]:
+        """Scan a single port inside a semaphore."""
+        async with port_semaphore:
+            svc = state.services.get(port)
+            if svc is None:
+                logger.warning("No ServiceInfo for port %d — skipping", port)
+                return port, []
 
-        hostname = svc.hostname or state.primary_hostname
+            if svc.url:
+                url = svc.url.replace("TARGET", target)
+            else:
+                scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
+                host = svc.hostname or target
+                url = f"{scheme}://{host}:{port}"
 
-        try:
-            port_results = await _scan_port(
-                target=target,
-                port=port,
-                url=url,
-                hostname=hostname,
-                state=state,
-                config=config,
-                output_dir=output_dir,
-            )
-        except Exception as exc:
-            logger.exception("[web:%d] Sub-module pipeline failed: %s", port, exc)
-            any_error = True
-            all_findings.append(
-                Finding(
+            hostname = svc.hostname or state.primary_hostname
+
+            try:
+                port_results = await _scan_port(
+                    target=target,
+                    port=port,
+                    url=url,
+                    hostname=hostname,
+                    state=state,
+                    config=config,
+                    output_dir=output_dir,
+                )
+                return port, port_results
+            except Exception as exc:
+                logger.exception("[web:%d] Sub-module pipeline failed: %s", port, exc)
+                error_finding = Finding(
                     severity=Severity.HIGH,
                     title=f"Web scan pipeline failed on port {port}",
                     description=str(exc),
                     module="web",
                 )
-            )
+                return port, [ModuleResult(
+                    module_name="web",
+                    status="error",
+                    findings=[error_finding],
+                    error_message=str(exc),
+                )]
+
+    port_tasks = [
+        asyncio.create_task(_scan_port_bounded(port))
+        for port in web_ports
+    ]
+    port_results_list = await asyncio.gather(*port_tasks, return_exceptions=True)
+
+    for result in port_results_list:
+        if isinstance(result, Exception):
+            logger.error("Port scan task raised: %s", result)
+            any_error = True
             continue
 
-        for result in port_results:
-            all_findings.extend(result.findings)
-            if result.raw_output:
-                all_raw.append(f"--- {result.module_name} (port {port}) ---\n{result.raw_output}")
-            if result.status == "error":
+        port, port_results = result
+        for mod_result in port_results:
+            all_findings.extend(mod_result.findings)
+            if mod_result.raw_output:
+                all_raw.append(f"--- {mod_result.module_name} (port {port}) ---\n{mod_result.raw_output}")
+            if mod_result.status == "error":
                 any_error = True
 
     # --- Combine into single ModuleResult ---
@@ -219,3 +255,4 @@ async def run_web_module(
         raw_output=combined_raw[:10000],  # cap to avoid bloated state
         duration_seconds=time.monotonic() - t0,
     )
+
