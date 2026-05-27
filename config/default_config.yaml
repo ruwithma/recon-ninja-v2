@@ -1,0 +1,34 @@
+scan:
+  default_threads: 10
+  default_timeout: 300
+  nmap_min_rate: 5000
+  rustscan_ulimit: 5000
+  udp_enabled: false
+  stealth_mode: false
+
+wordlists:
+  seclists_base: /usr/share/seclists
+  dir_medium: Discovery/Web-Content/raft-medium-directories.txt
+  dir_small: Discovery/Web-Content/common.txt
+  vhosts: Discovery/DNS/subdomains-top1million-5000.txt
+  usernames: Usernames/xato-net-10-million-usernames-dup.txt
+  snmp: Discovery/SNMP/snmp.txt
+  custom_dir: null
+
+tools:
+  preferred_dir_fuzzer: feroxbuster
+  preferred_smb_enum: enum4linux-ng
+
+output:
+  always_html: false
+  always_json: true
+  timestamp_dirs: true
+
+htb:
+  vpn_interface: tun0
+  auto_add_hosts: false
+  machine_name: null
+
+api_keys:
+  shodan: null
+  nvd: null

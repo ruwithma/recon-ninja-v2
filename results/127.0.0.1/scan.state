@@ -1,0 +1,16 @@
+{
+  "target": "127.0.0.1",
+  "start_time": "2026-05-27T08:16:01.673430",
+  "output_dir": "/home/z/my-project/results/127.0.0.1",
+  "open_ports": [],
+  "udp_ports": [],
+  "services": {},
+  "hostnames": [],
+  "box_profile": "UNKNOWN",
+  "completed_modules": [],
+  "all_findings": [],
+  "module_results": [],
+  "available_tools": {},
+  "current_phase": 0,
+  "end_time": null
+}

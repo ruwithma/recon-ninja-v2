@@ -1,0 +1,226 @@
+# 🥷 Recon Ninja v2
+
+> Automated reconnaissance tool for CTFs (HackTheBox, TryHackMe, OSCP) and pentesting.
+> Built in Python 3.10+ with async concurrency, modular architecture, and a rich terminal UI.
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Install dependencies
+chmod +x install.sh && ./install.sh
+
+# Run against a target
+recon-ninja 10.10.11.58
+
+# HTB mode with auto-hosts
+recon-ninja 10.10.11.58 --htb --add-hosts
+
+# Fast scan (port scan + basic enum only)
+recon-ninja 10.10.11.58 --fast
+
+# Full scan with all modules
+recon-ninja 10.10.11.58 --full
+
+# Only web enumeration
+recon-ninja dog.htb --only-web
+
+# Resume interrupted scan
+recon-ninja 10.10.11.58 --resume
+```
+
+---
+
+## 🎯 Overview
+
+| Field | Value |
+|-------|-------|
+| **Command** | `recon-ninja <TARGET> [OPTIONS]` |
+| **Language** | Python 3.10+ |
+| **Concurrency** | `asyncio` + `asyncio.create_subprocess_exec` |
+| **UI** | `rich` (live panels, progress, tables, spinners) |
+| **Config** | `~/.config/recon-ninja/config.yaml` |
+| **Output** | `./results/<target>/` — organized by phase |
+
+**Philosophy:** Run the RIGHT tools in the RIGHT order, branch on what you find, surface findings with suggested next steps.
+
+---
+
+## 🔄 Execution Phases
+
+| Phase | Description | Key Tools |
+|-------|-------------|-----------|
+| **0** | Pre-flight & Config | Target validation, VPN check, tool inventory |
+| **1** | Fast Port Discovery | RustScan → nmap fallback |
+| **2** | Deep Service Enumeration | nmap `-sC -sV -O`, box classification |
+| **3** | Service-Specific Modules | Web, SMB, SSH, FTP, SMTP, SNMP, DNS, LDAP, Kerberos, RPC, NFS, RDP, VNC, WinRM, DB, SSL |
+| **4** | OSINT | whois, crt.sh, subfinder, theHarvester |
+| **5** | Vulnerability Correlation | searchsploit, nuclei, NVD API |
+| **6** | Loot Extraction | Regex patterns for creds, hashes, emails |
+| **7** | Report Generation | Markdown, HTML, JSON |
+
+---
+
+## ⚙️ CLI Flags
+
+```
+recon-ninja <TARGET> [OPTIONS]
+
+Scan control:
+  --fast              Port scan + basic service enum only
+  --full              All modules incl. nuclei, amass, theHarvester, testssl
+  --udp               Enable UDP scanning (requires root)
+  --stealth           Low-rate scanning (T2, --scan-delay 200ms)
+  --aggressive        Include potentially disruptive checks
+  --ports PORTS       Override port list (e.g. 80,443,8080)
+  --rate N            Nmap --min-rate override (default: 5000)
+  --timeout N         Global per-tool timeout in seconds (default: 300)
+  -t, --threads N     Max concurrent modules (default: 10)
+
+Module toggles:
+  --no-web            Skip web modules
+  --no-smb            Skip SMB modules
+  --no-vuln           Skip vulnerability scanning
+  --no-osint          Skip OSINT
+  --only-web          Only run web enumeration
+  --only-ports        Phase 1+2 only
+
+Input/Output:
+  -o, --output DIR    Output directory
+  --config FILE       Config file path
+  --wordlist FILE     Custom wordlist for dir fuzzing
+  --html              Generate HTML report
+  --json/--no-json    Generate JSON findings file (default: on)
+  --resume            Resume from last checkpoint
+  --no-vpn-check      Skip VPN interface check
+
+Authentication:
+  --creds USER:PASS   Pass credentials to modules that support auth
+  --domain DOMAIN     AD domain name
+
+HTB/CTF helpers:
+  --htb               HackTheBox mode: VPN check, auto-/etc/hosts
+  --add-hosts         Auto-add hostname to /etc/hosts
+  --platform          Platform: htb, thm, oscp, bugbounty
+
+Output verbosity:
+  -v, --verbose       Print raw tool output
+  -q, --quiet         Final summary only
+  --proxy URL         Route HTTP tools through proxy
+  --version           Show version
+```
+
+---
+
+## 🗂️ Project Structure
+
+```
+recon_ninja/
+├── __init__.py
+├── main.py                    # CLI entry point (typer)
+├── core/
+│   ├── engine.py              # Async orchestrator — runs phases in order
+│   ├── runner.py              # asyncio.create_subprocess_exec wrapper
+│   ├── models.py              # ModuleResult, Finding, ServiceInfo, ScanState dataclasses
+│   ├── config.py              # Config loader (YAML + CLI override)
+│   ├── state.py               # Session state / checkpoint save+restore
+│   ├── display.py             # Rich live display, panels, tables
+│   ├── report.py              # Markdown + HTML + JSON report writer
+│   └── loot.py                # Regex-based loot extractor
+├── modules/
+│   ├── port_scan.py           # Phase 1+2: RustScan → Nmap
+│   ├── web/
+│   │   ├── __init__.py        # Web module orchestrator
+│   │   ├── web_core.py        # whatweb, headers, robots.txt, screenshots
+│   │   ├── web_dirfuzz.py     # feroxbuster / gobuster / ffuf dir+vhost
+│   │   ├── web_vuln.py        # nikto, nuclei, wafw00f
+│   │   └── web_cms.py         # CMS detect → wpscan/droopescan/joomscan + API discovery
+│   ├── smb.py, ssh.py, ftp.py, smtp.py, snmp.py
+│   ├── dns.py, ldap.py, kerberos.py, rpc.py
+│   ├── nfs.py, rdp.py, vnc.py, winrm.py
+│   ├── database.py, ssl.py, osint.py
+│   └── vuln_correlate.py      # searchsploit + nuclei against all versions
+└── utils/
+    ├── checker.py             # Tool availability checker
+    ├── wordlists.py           # SecLists path resolver
+    ├── nmap_parser.py         # Pure xml.etree nmap XML parser
+    ├── network.py             # IP/CIDR validation, VPN check
+    └── hosts.py               # /etc/hosts read/write helper
+```
+
+---
+
+## 📦 Dependencies
+
+### Python (auto-installed)
+```bash
+pip install -e .
+```
+
+### System Tools — Required
+```bash
+nmap, smbclient, nikto, whatweb, sslscan, dnsrecon, searchsploit, ldap-utils
+```
+
+### System Tools — Optional (gracefully skipped if missing)
+```bash
+rustscan, feroxbuster, gobuster, ffuf, nuclei, subfinder, httpx, kerbrute,
+gowitness, theHarvester, crackmapexec, ssh-audit, wpscan, droopescan,
+testssl.sh, amass, windapsearch, enum4linux-ng, smbmap, onesixtyone, joomscan
+```
+
+### One-shot Install
+```bash
+chmod +x install.sh && ./install.sh
+```
+
+---
+
+## 🏗️ Box Profile Classification
+
+Recon Ninja automatically classifies targets:
+
+| Profile | Detection |
+|---------|-----------|
+| `WINDOWS_AD` | Kerberos (88) + LDAP (389) + SMB (445) + WinRM/RPC |
+| `WINDOWS_WEB` | IIS detected, no Kerberos |
+| `LINUX_WEB` | SSH (22) + HTTP, no SMB |
+| `LINUX_AD` | Samba + LDAP, no Kerberos |
+| `LINUX_SERVER` | SSH only, no web |
+| `UNKNOWN` | Default |
+
+---
+
+## 📄 Output
+
+Each scan creates a timestamped directory:
+
+```
+results/10.10.11.58_20250527_1430/
+├── 00_SUMMARY.md          # Full markdown report
+├── 00_SUMMARY.html        # Styled HTML report (with --html)
+├── 00_findings.json       # Machine-readable JSON
+├── recon-ninja.log        # Debug log
+├── scan.state             # Checkpoint file for --resume
+├── web/                   # Web module output
+├── smb/                   # SMB module output
+├── loot/                  # Extracted credentials & artifacts
+│   ├── usernames.txt
+│   ├── hashes.txt
+│   └── emails.txt
+└── ...                    # Per-module output files
+```
+
+---
+
+## ⚠️ Legal Disclaimer
+
+**Recon Ninja is designed exclusively for authorized security testing.**
+Use only on machines and networks you own or have explicit written permission to test.
+Unauthorized scanning is illegal under the CFAA, Computer Misuse Act, and equivalent laws worldwide.
+HackTheBox, TryHackMe, OSCP labs, and your own home lab are the intended environments.
+
+---
+
+*Built for CTF warriors. Sharpened for pentesters. v2.0*
