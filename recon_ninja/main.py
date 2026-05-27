@@ -115,12 +115,14 @@ err_console = Console(stderr=True)
 
 _BANNER = (
     "[bold bright_cyan]"
-    "  ╭──────────────────────────────────────────╮\n"
-    "  │           R E C O N N I N J A            │\n"
-    "  │               v{version}                    │\n"
-    "  │   Automated recon for CTFs & pentesting  │\n"
-    "  ╰──────────────────────────────────────────╯"
+    "   __    __  ___   ___    __    __ _____    __ __    _   \n"
+    "  /__\\  /__\\/ __\\ /___\\/\\ \\ \\/\\ \\ \\\\_   /\\ \\ \\\\ \\  /_\\ \n"
+    " / \\// /_\\ / /   //  //  \\/ /  \\/ / / /\\/  \\/ / \\ \\//_\\\\ \n"
+    "/ _  \\/__/ /___/ \\_// /\\  / /\\  /\\/ /_/ /\\  /\\_/ /  _  \\\n"
+    "\\/ \\_/\\__/\\____/\\___/\\_\\ \\/\\_\\ \\/\\____/\\_\\ \\/\\___/\\_/ \\_\\\n"
     "[/bold bright_cyan]"
+    "                  [dim]v{version}[/dim]\n"
+    "         [dim]Automated recon for CTFs & pentesting[/dim]"
 )
 
 
@@ -604,7 +606,7 @@ def scan_cmd(
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s [%(levelname]-7s] %(name)s: %(message)s",
+        format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
 
