@@ -525,7 +525,7 @@ async def run_vuln_correlate_module(
                 "-t", "exposures/",
                 "-t", "misconfiguration/",
                 "-severity", "critical,high,medium",
-                "-json",
+                "-jsonl",
                 "-silent",
             ]
 

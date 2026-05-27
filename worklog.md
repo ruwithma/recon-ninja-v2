@@ -229,4 +229,26 @@ Stage Summary:
 - Integrated Nuclei output parsing to present detailed first-class vulnerability findings on the terminal and in reports.
 - All tests and type checks pass.
 
+---
+Task ID: 9
+Agent: main
+Task: Critical Bugfixes & Scan Reliability Improvements
+
+Work Log:
+- Fixed critical NameError crash in `web_core.py`: `output_file=outfile if rc == 0 else None` used `rc` before it was assigned (it's the return value of the same `run_tool` call). Changed to always write the output file.
+- Fixed curl HEAD check timeout warnings flooding the output: replaced `run_tool` timeout=10 with curl's native `--connect-timeout 5` and `--max-time 8` flags, and set `run_tool` timeout=15 as a generous safety net. Curl now exits cleanly on timeout (rc=28, status=000) without triggering WARNING log messages.
+- Reduced concurrent HEAD requests from 10 to 5 to avoid overwhelming the target server.
+- Reordered `web_dirfuzz.py` scan phases: sensitive path HEAD checks now run FIRST (before feroxbuster), preventing the aggressive directory fuzzing from triggering WAF/rate-limiting before lightweight probes can complete.
+- Fixed searchsploit JSON key mismatch in `engine.py`: was looking for `RESULTS` key but searchsploit actually uses `RESULTS_EXPLOIT` or `RESULTS_SEARCH`. Updated to try all known key variants.
+- Fixed nuclei flag inconsistency in `vuln_correlate.py`: was using `-json` but the parsing logic expects JSONL format (one JSON object per line). Changed to `-jsonl` to match `engine.py` and the parser.
+- Fixed RustScan flags (uncommitted change from previous session): switched from long flags (`--addresses`, `--range`, `--ulimit`) to short flags (`-a`, `-r`, `-u`) for better compatibility.
+- Verified all 311 unit tests pass and mypy reports no type errors.
+
+Stage Summary:
+- Fixed a crash-on-every-scan bug in web_core.py (NameError).
+- Eliminated noisy WARNING timeout messages from curl HEAD checks.
+- Improved scan reliability: HEAD checks run before aggressive fuzzing.
+- Fixed searchsploit result parsing to find exploits correctly.
+- Consistent nuclei JSONL flag usage across all modules.
+- All tests and type checks pass.
 

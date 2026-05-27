@@ -364,7 +364,7 @@ async def run_web_core(
             outfile = output_dir / path.replace(".", "_")
             rc, stdout, stderr = await run_tool(
                 cmd=["curl", "-sL", "--max-time", "10", fetch_url],
-                output_file=outfile if rc == 0 else None,  # type: ignore[arg-type]
+                output_file=outfile,
                 timeout=15,
             )
             if rc == 0 and stdout.strip() and "<!doctype" not in stdout.lower()[:100]:

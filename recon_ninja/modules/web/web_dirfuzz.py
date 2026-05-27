@@ -271,8 +271,13 @@ async def _check_path(
     full_url = f"{url}{path}"
     try:
         rc, stdout, stderr = await run_tool(
-            cmd=["curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}", full_url],
-            timeout=10,
+            cmd=[
+                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                "--connect-timeout", "5",
+                "--max-time", "8",
+                full_url,
+            ],
+            timeout=15,  # generous — curl's own --max-time handles the real limit
         )
         # stdout contains just the status code with -w
         status_str = stdout.strip()
@@ -356,7 +361,36 @@ async def run_web_dirfuzz(
     depth = "1" if config.fast_mode else "2"
 
     # ------------------------------------------------------------------
-    # 1. Directory fuzzing — feroxbuster or gobuster
+    # 1. Common path probing (async HEAD requests) — run FIRST
+    #    These are lightweight and must execute before feroxbuster
+    #    hammers the target (which could trigger WAF/rate-limiting).
+    # ------------------------------------------------------------------
+    if shutil.which("curl"):
+        # Run HEAD checks concurrently (bounded)
+        semaphore = asyncio.Semaphore(5)
+
+        async def _bounded_check(
+            u: str, p: str, s: Severity,
+        ) -> Finding | None:
+            async with semaphore:
+                return await _check_path(u, p, s)
+
+        head_tasks = [
+            asyncio.create_task(_bounded_check(url, path, sev))
+            for path, sev in COMMON_PATHS
+            if path not in ("/", "/robots.txt")
+        ]
+
+        head_results = await asyncio.gather(*head_tasks, return_exceptions=True)
+
+        for result in head_results:
+            if isinstance(result, Finding):
+                findings.append(result)
+            elif isinstance(result, Exception):
+                logger.debug("HEAD check raised: %s", result)
+
+    # ------------------------------------------------------------------
+    # 2. Directory fuzzing — feroxbuster or gobuster
     # ------------------------------------------------------------------
     if shutil.which("feroxbuster"):
         ferox_out = output_dir / "feroxbuster.txt"
@@ -425,7 +459,7 @@ async def run_web_dirfuzz(
         raw_parts.append("=== directory fuzzing === SKIPPED (no tool available)")
 
     # ------------------------------------------------------------------
-    # 2. Vhost scan — if hostname is known
+    # 3. Vhost scan — if hostname is known
     # ------------------------------------------------------------------
     if hostname:
         vhost_wordlist = str(
@@ -478,33 +512,6 @@ async def run_web_dirfuzz(
             raw_parts.append(f"=== ffuf vhost ===\n{stdout[:3000]}")
     else:
         logger.debug("No hostname known — skipping vhost scan")
-
-    # ------------------------------------------------------------------
-    # 3. Common path probing (async HEAD requests)
-    # ------------------------------------------------------------------
-    if shutil.which("curl"):
-        # Run HEAD checks concurrently (bounded)
-        semaphore = asyncio.Semaphore(10)
-
-        async def _bounded_check(
-            u: str, p: str, s: Severity,
-        ) -> Finding | None:
-            async with semaphore:
-                return await _check_path(u, p, s)
-
-        head_tasks = [
-            asyncio.create_task(_bounded_check(url, path, sev))
-            for path, sev in COMMON_PATHS
-            if path not in ("/", "/robots.txt")
-        ]
-
-        head_results = await asyncio.gather(*head_tasks, return_exceptions=True)
-
-        for result in head_results:
-            if isinstance(result, Finding):
-                findings.append(result)
-            elif isinstance(result, Exception):
-                logger.debug("HEAD check raised: %s", result)
 
     # ------------------------------------------------------------------
     # Done

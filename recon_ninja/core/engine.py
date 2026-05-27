@@ -300,9 +300,9 @@ class ReconEngine:
             ulimit_val = min(5000, hard)
             cmd = [
                 rustscan_path,
-                "--addresses", self.target,
-                "--range", f"1-{top_ports}",
-                "--ulimit", str(ulimit_val),
+                "-a", self.target,
+                "-r", f"1-{top_ports}",
+                "-u", str(ulimit_val),
                 "--scripts", "none",
             ]
             
@@ -717,7 +717,7 @@ class ReconEngine:
             for wt in web_targets:
                 nuclei_cmd.extend(["-u", wt])
 
-            nuclei_cmd.extend(["-json", "-o", str(self.output_dir / "nuclei.txt")])
+            nuclei_cmd.extend(["-jsonl", "-o", str(self.output_dir / "nuclei.txt")])
             if self.config.nuclei_templates:
                 nuclei_cmd.extend(["-t", self.config.nuclei_templates])
             commands.append(("nuclei", nuclei_cmd, self.output_dir / "nuclei.txt"))
@@ -810,7 +810,12 @@ class ReconEngine:
         try:
             import json
             data = json.loads(stdout)
-            results = data.get("RESULTS", data.get("results", []))
+            results = (
+                data.get("RESULTS_EXPLOIT", [])
+                or data.get("RESULTS_SEARCH", [])
+                or data.get("RESULTS", [])
+                or data.get("results", [])
+            )
             if isinstance(results, list):
                 for entry in results[:10]:
                     if isinstance(entry, dict):
