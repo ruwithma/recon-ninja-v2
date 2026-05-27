@@ -453,11 +453,39 @@ def display_loot_summary(loot_counts: dict[str, int]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def display_attack_paths(state: ScanState) -> None:
+    """Display context-aware attack path suggestions."""
+    from recon_ninja.core.report import _generate_attack_paths, _deduplicated_commands
+    console = get_console()
+
+    finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
+    context_cmds = _generate_attack_paths(state)
+    all_cmds = finding_cmds + [c for c in context_cmds if c not in set(finding_cmds)]
+
+    if not all_cmds:
+        console.print("[dim]No suggested attack paths.[/]")
+        return
+
+    lines = []
+    for i, cmd in enumerate(all_cmds[:15], 1):
+        lines.append(f"  [bold bright_cyan]{i:2d}.[/]  {cmd}")
+
+    content = "\n".join(lines)
+    panel = Panel(
+        content,
+        title="⚔️ ATTACK PATHS",
+        border_style="bright_red",
+        padding=(1, 2),
+    )
+    console.print(panel)
+    console.print()
+
+
 def display_scan_summary(state: ScanState) -> None:
     """Display the complete final scan summary.
 
-    Combines the port table, box profile, findings, next steps, and loot
-    into one cohesive final display.
+    Combines the port table, box profile, findings, attack paths, next steps,
+    and loot into one cohesive final display.
 
     Parameters
     ----------
@@ -483,6 +511,9 @@ def display_scan_summary(state: ScanState) -> None:
     # Build loot_counts from module results (best-effort heuristic)
     loot_counts = _extract_loot_counts(state)
     display_loot_summary(loot_counts)
+
+    # --- Attack paths ---
+    display_attack_paths(state)
 
     # --- Next steps ---
     display_next_steps(state.all_findings)

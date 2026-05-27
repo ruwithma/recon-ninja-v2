@@ -14,6 +14,17 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
 
+from rich.console import Console as RichConsole
+
+from recon_ninja.core.display import (
+    display_phase_header,
+    display_port_table,
+    display_box_profile,
+    display_findings_panel,
+    display_loot_summary,
+    display_scan_summary,
+    get_console,
+)
 from recon_ninja.core.models import (
     Finding,
     ModuleResult,
@@ -136,10 +147,11 @@ class ReconEngine:
         final_state = await engine.run()
     """
 
-    def __init__(self, target: str, config: ReconConfig, state: ScanState) -> None:
+    def __init__(self, target: str, config: ReconConfig, state: ScanState, quiet: bool = False) -> None:
         self.target = target
         self.config = config
         self.state = state
+        self.quiet = quiet
 
         # Convenience
         self.output_dir = state.output_dir
@@ -211,6 +223,9 @@ class ReconEngine:
             phase_name = PHASE_NAMES.get(phase_num, f"Phase {phase_num}")
             logger.info(">>> Phase %d: %s <<<", phase_num, phase_name)
 
+            if not self.quiet:
+                display_phase_header(phase_num, phase_name)
+
             t0 = time.monotonic()
             try:
                 await phase_func()
@@ -262,6 +277,9 @@ class ReconEngine:
         # --- RustScan path ---
         if shutil.which("rustscan"):
             logger.info("Using RustScan for port discovery")
+            if not self.quiet:
+                console = get_console()
+                console.print("  [dim]Using RustScan for fast port discovery...[/]")
             top_ports = "1000" if self.config.fast_mode else "10000"
             cmd = [
                 "rustscan",
@@ -287,6 +305,9 @@ class ReconEngine:
                 await self._nmap_fast_scan()
         else:
             logger.info("RustScan not found, using nmap for port discovery")
+            if not self.quiet:
+                console = get_console()
+                console.print("  [dim]Using nmap for port discovery...[/]")
             await self._nmap_fast_scan()
 
         # --- Optional UDP scan ---
@@ -296,6 +317,10 @@ class ReconEngine:
         # Persist port list for other phases
         ports_file.write_text(",".join(str(p) for p in self.state.open_ports), encoding="utf-8")
         logger.info("Open ports written to %s", ports_file)
+
+        if not self.quiet:
+            console = get_console()
+            console.print(f"  [green]✓[/] Found [bold]{len(self.state.open_ports)}[/] open ports: [cyan]{', '.join(str(p) for p in self.state.open_ports)}[/]")
 
     async def _nmap_fast_scan(self) -> None:
         """Fast SYN scan using nmap as fallback."""
@@ -401,6 +426,10 @@ class ReconEngine:
         self.state.box_profile = self._classify_box()
         logger.info("Box profile: %s", self.state.box_profile)
 
+        if not self.quiet:
+            display_port_table(self.state.services)
+            display_box_profile(self.state.box_profile)
+
     # ------------------------------------------------------------------
     # Phase 3 — Service-Specific Modules
     # ------------------------------------------------------------------
@@ -432,6 +461,11 @@ class ReconEngine:
             return
 
         logger.info("Running %d modules: %s", len(enabled_modules), [n for n, _ in enabled_modules])
+
+        if not self.quiet:
+            console = get_console()
+            for name, _func in enabled_modules:
+                console.print(f"  [dim]▸[/] Running [bold]{name}[/] module...")
 
         semaphore = asyncio.Semaphore(self.config.max_concurrent)
         results: list[ModuleResult] = []
@@ -491,6 +525,21 @@ class ReconEngine:
         ]
 
         module_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        if not self.quiet:
+            console = get_console()
+            for result in module_results:
+                if isinstance(result, Exception) or not isinstance(result, ModuleResult):
+                    continue
+                name = result.module_name
+                if result.status == "done":
+                    console.print(f"  [green]✓[/] {name} [dim]({result.duration_seconds:.1f}s)[/]")
+                elif result.status == "error":
+                    console.print(f"  [red]✗[/] {name} [dim]— {result.error_message[:80]}[/]")
+                elif result.status == "skipped":
+                    console.print(f"  [yellow]⊘[/] {name} [dim]— skipped[/]")
+                elif result.status == "timeout":
+                    console.print(f"  [red]⏱[/] {name} [dim]— timed out[/]")
 
         for result in module_results:
             if isinstance(result, Exception):
@@ -618,6 +667,11 @@ class ReconEngine:
             logger.info("No vulnerability correlation tools available")
             return
 
+        if not self.quiet:
+            console = get_console()
+            for name, (_cmd_list, _outfile) in commands:
+                console.print(f"  [dim]▸[/] Running [bold]{name}[/]...")
+
         results = await run_multiple(
             commands,
             max_concurrent=self.config.max_concurrent,
@@ -722,6 +776,16 @@ class ReconEngine:
                     )
                 )
 
+        if not self.quiet:
+            console = get_console()
+            loot_counts = {}
+            for result in self.state.module_results:
+                if result.module_name == "loot" and result.findings:
+                    for f in result.findings:
+                        loot_counts[f.title.replace("Loot: ", "")] = int(f.description.split()[1]) if f.description else 0
+            if loot_counts:
+                display_loot_summary(loot_counts)
+
     # ------------------------------------------------------------------
     # Phase 7 — Report Generation
     # ------------------------------------------------------------------
@@ -738,6 +802,10 @@ class ReconEngine:
         # Determine whether HTML report was requested
         html = self.config.module_toggles.get("_html_report", False)
         json_output = self.config.module_toggles.get("_json_report", True)
+
+        if not self.quiet:
+            console = get_console()
+            console.print("  [dim]Generating reports...[/]")
 
         generated = await generate_reports(
             state=self.state,

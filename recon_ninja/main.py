@@ -343,43 +343,6 @@ def _display_preflight(
 
 
 # ---------------------------------------------------------------------------
-# Final summary display
-# ---------------------------------------------------------------------------
-
-
-def _display_summary(state: ScanState) -> None:
-    """Print the final scan summary."""
-    console.print()
-    console.print(Panel(
-        f"[bold]Scan Complete[/bold]\n"
-        f"Target: [cyan]{state.target}[/cyan]\n"
-        f"Duration: [dim]{state.duration:.1f}s[/dim]\n"
-        f"Open ports: [cyan]{', '.join(str(p) for p in state.open_ports) or 'none'}[/cyan]\n"
-        f"Hostnames: [cyan]{', '.join(state.hostnames) or 'none'}[/cyan]\n"
-        f"Box profile: [yellow]{state.box_profile}[/yellow]\n"
-        f"Findings: [bold]{len(state.all_findings)}[/bold]",
-        title="[bold green]🥷 ReconNinja[/bold green]",
-        border_style="green",
-    ))
-
-    if state.all_findings:
-        from recon_ninja.core.models import Severity
-        by_sev = state.findings_by_severity()
-        sev_table = Table(title="Findings by Severity", show_lines=False)
-        sev_table.add_column("Severity", style="bold")
-        sev_table.add_column("Count", justify="right")
-        for sev in Severity:
-            count = len(by_sev.get(sev, []))
-            if count:
-                sev_table.add_row(
-                    f"{sev.icon} {sev.value}",
-                    str(count),
-                    style=sev.rich_style,
-                )
-        console.print(sev_table)
-
-
-# ---------------------------------------------------------------------------
 # Scan command — the primary scan entry point
 # ---------------------------------------------------------------------------
 
@@ -601,14 +564,30 @@ def scan_cmd(
     # 5. Create engine and run
     # ------------------------------------------------------------------
 
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    # Set up logging: file only (Rich UI handles console output)
+    root_logger = logging.getLogger("recon_ninja")
+    root_logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
-    engine = ReconEngine(target=target, config=recon_config, state=state)
+    # Remove any existing handlers
+    root_logger.handlers.clear()
+
+    # File handler — always write to log file
+    log_path = output_dir / "reconninja.log"
+    file_handler = logging.FileHandler(str(log_path), encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root_logger.addHandler(file_handler)
+
+    # Console handler — only show warnings and above (errors)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    root_logger.addHandler(console_handler)
+
+    engine = ReconEngine(target=target, config=recon_config, state=state, quiet=quiet)
 
     try:
         final_state = asyncio.run(engine.run())
@@ -625,7 +604,8 @@ def scan_cmd(
     # 6. Display final summary
     # ------------------------------------------------------------------
     if not quiet:
-        _display_summary(final_state)
+        from recon_ninja.core.display import display_scan_summary
+        display_scan_summary(final_state)
 
     # ------------------------------------------------------------------
     # 7. Auto-add hostnames to /etc/hosts if --add-hosts or --htb
