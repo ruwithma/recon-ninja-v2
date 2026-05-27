@@ -92,17 +92,17 @@ _SERVICE_STYLES: dict[str, str] = {
 
 # Category → icon for tech stack
 _CATEGORY_ICONS: dict[str, str] = {
-    "language": "🔤",
-    "framework": "🏗️",
-    "cms": "📝",
-    "server": "🖥️",
-    "waf": "🛡️",
-    "library": "📚",
-    "os": "💾",
-    "cdn": "🌐",
-    "database": "🗄️",
-    "analytics": "📊",
-    "other": "❓",
+    "language": "[LANG]",
+    "framework": "[FW]",
+    "cms": "[CMS]",
+    "server": "[SRV]",
+    "waf": "[WAF]",
+    "library": "[LIB]",
+    "os": "[OS]",
+    "cdn": "[CDN]",
+    "database": "[DB]",
+    "analytics": "[AN]",
+    "other": "[OTHER]",
 }
 
 
@@ -144,10 +144,10 @@ def display_banner(target: str, interface: str, is_root: bool, tool_count: int) 
     """
     console = get_console()
 
-    root_status = "[bold green]✓[/] root" if is_root else "[bold red]✗[/] non-root"
+    root_status = "[bold green][+][/] root" if is_root else "[bold yellow][!][/] non-root"
 
     content = Text.from_markup(
-        "🥷 [bold bright_green]ReconNinja v2[/]\n\n"
+        "[bold bright_green]RECON_NINJA v2[/]\n\n"
         f"  [bold]Target[/]    {target}\n"
         f"  [bold]Interface[/] {interface}\n"
         f"  [bold]Privilege[/] {root_status}\n"
@@ -158,7 +158,7 @@ def display_banner(target: str, interface: str, is_root: bool, tool_count: int) 
         Align.center(content),
         border_style="bold green",
         padding=(1, 4),
-        title="[bold green]🥷 ReconNinja[/]",
+        title="[bold green] RECON_NINJA [/]",
         title_align="center",
     )
     console.print(panel)
@@ -189,25 +189,25 @@ def display_preflight_checklist(
     """
     console = get_console()
     table = Table(show_header=True, header_style="bold white", box=None, padding=(0, 1))
-    table.add_column("Status", width=3)
+    table.add_column("Status", width=8)
     table.add_column("Item", style="bold")
     table.add_column("Detail")
 
     # Required tools
     for tool_name, found in available_tools.items():
         if tool_name in missing_required:
-            icon = "❌"
+            icon = "[bold red][x][/]"
             detail = "[bold red]MISSING (required)[/]"
         elif found:
-            icon = "✅"
+            icon = "[bold green][+][/]"
             detail = "[green]found[/]"
         else:
-            icon = "❌"
+            icon = "[dim][x][/]"
             detail = "[dim]not found[/]"
         table.add_row(icon, tool_name, detail)
 
     # SecLists
-    sl_icon = "✅" if seclists_found else "⚠️"
+    sl_icon = "[bold green][+][/]" if seclists_found else "[bold yellow][!][/]"
     sl_detail = (
         "[green]found[/]"
         if seclists_found
@@ -216,12 +216,12 @@ def display_preflight_checklist(
     table.add_row(sl_icon, "SecLists", sl_detail)
 
     # VPN
-    vpn_icon = "✅" if vpn_ok else "⚠️"
+    vpn_icon = "[bold green][+][/]" if vpn_ok else "[bold yellow][!][/]"
     vpn_detail = "[green]connected[/]" if vpn_ok else "[yellow]not detected[/]"
     table.add_row(vpn_icon, "VPN", vpn_detail)
 
     # Root
-    root_icon = "✅" if is_root else "⚠️"
+    root_icon = "[bold green][+][/]" if is_root else "[bold yellow][!][/]"
     root_detail = (
         "[green]running as root[/]"
         if is_root
@@ -231,7 +231,7 @@ def display_preflight_checklist(
 
     panel = Panel(
         table,
-        title="[bold]📋 Pre-Flight Checklist[/]",
+        title="[bold] PRE-FLIGHT CHECKLIST [/]",
         border_style="bright_blue",
         padding=(1, 2),
     )
@@ -257,7 +257,7 @@ def display_phase_header(phase_num: int, phase_name: str) -> None:
     console = get_console()
     console.print()
     console.rule(
-        f"[bold bright_yellow]⚡ Phase {phase_num}: {phase_name}",
+        f"[bold bright_yellow]>>> Phase {phase_num}: {phase_name}",
         style="bright_yellow",
     )
     console.print()
@@ -282,7 +282,7 @@ def display_port_table(services: dict[int, ServiceInfo]) -> None:
 
     console = get_console()
     table = Table(
-        title="🌐 Open Ports & Services",
+        title="[bold bright_cyan] OPEN PORTS & SERVICES [/]",
         show_header=True,
         header_style="bold white",
         border_style="blue",
@@ -367,13 +367,13 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
         port_techs = [t for t in techs if t.port == port]
 
         table = Table(
-            title=f"🔬 Tech Stack — Port {port}",
+            title=f"[bold bright_cyan] Tech Stack — Port {port} [/]",
             show_header=True,
             header_style="bold white",
             border_style="cyan",
             title_style="bold bright_cyan",
         )
-        table.add_column("", width=4)
+        table.add_column("Tag", width=12)
         table.add_column("Technology", style="bold", min_width=16)
         table.add_column("Version", width=12)
         table.add_column("Category", width=12)
@@ -382,7 +382,7 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
         table.add_column("CVEs", min_width=10)
 
         for tech in port_techs:
-            cat_icon = _CATEGORY_ICONS.get(tech.category, "❓")
+            cat_icon = _CATEGORY_ICONS.get(tech.category, "[OTHER]")
 
             category_style = {
                 "language": "bold yellow",
@@ -397,7 +397,7 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
             if tech.is_vulnerable:
                 cves = ", ".join(tech.cves)
                 cve_str = f"[bold red]{cves}[/]"
-                row_icon = f"{cat_icon}🔴"
+                row_icon = f"{cat_icon} [bold red][!][/]"
             else:
                 cve_str = "[dim]—[/]"
                 row_icon = cat_icon
@@ -422,7 +422,7 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
         for vtech in vulnerable:
             cve_list = ", ".join(vtech.cves)
             lines.append(
-                f"  [bold red]🔴[/] [bold]{vtech.name} {vtech.version}[/] "
+                f"  [bold red][!][/] [bold]{vtech.name} {vtech.version}[/] "
                 f"(port {vtech.port}) — [{cve_list}] via {vtech.source}"
             )
             lines.append(
@@ -432,7 +432,7 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
         content = "\n".join(lines)
         panel = Panel(
             content,
-            title="⚠️ VULNERABLE TECHNOLOGIES",
+            title="[bold red] VULNERABLE TECHNOLOGIES [/]",
             border_style="bold red",
             padding=(1, 2),
         )
@@ -491,7 +491,7 @@ def display_findings_panel(findings: list[Finding]) -> None:
     content = "\n".join(lines)
     panel = Panel(
         content,
-        title="🔥 FINDINGS",
+        title="[bold red] FINDINGS [/]",
         border_style="bold red",
         padding=(1, 2),
     )
@@ -544,7 +544,7 @@ def display_next_steps(findings: list[Finding]) -> None:
     content = "\n".join(lines)
     panel = Panel(
         content,
-        title="💡 SUGGESTED NEXT STEPS",
+        title="[bold bright_cyan] SUGGESTED NEXT STEPS [/]",
         border_style="bright_cyan",
         padding=(1, 2),
     )
@@ -557,17 +557,17 @@ def display_next_steps(findings: list[Finding]) -> None:
 # ---------------------------------------------------------------------------
 
 _LOOT_ICONS: dict[str, str] = {
-    "usernames": "👤",
-    "hashes": "🔑",
-    "emails": "📧",
-    "urls": "🔗",
-    "shares": "📂",
-    "kerberos": "🎫",
-    "certificates": "📜",
-    "configs": "📝",
-    "credentials": "🗝️",
-    "flags": "🚩",
-    "keys": "🔐",
+    "usernames": "[bold cyan][+][/]",
+    "hashes": "[bold red][+][/]",
+    "emails": "[bold blue][+][/]",
+    "urls": "[bold green][+][/]",
+    "shares": "[bold yellow][+][/]",
+    "kerberos": "[bold magenta][+][/]",
+    "certificates": "[bold white][+][/]",
+    "configs": "[bold white][+][/]",
+    "credentials": "[bold red][+][/]",
+    "flags": "[bold red][!][/]",
+    "keys": "[bold yellow][+][/]",
 }
 
 
@@ -585,19 +585,19 @@ def display_loot_summary(loot_counts: dict[str, int]) -> None:
 
     console = get_console()
     table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Icon", width=2)
+    table.add_column("Icon")
     table.add_column("Category", style="bold")
     table.add_column("Count", justify="right", style="bright_green")
 
     for category, count in sorted(loot_counts.items()):
         if count <= 0:
             continue
-        icon = _LOOT_ICONS.get(category, "📦")
+        icon = _LOOT_ICONS.get(category, "[bold white][+][/]")
         table.add_row(icon, category, str(count))
 
     panel = Panel(
         table,
-        title="💰 LOOT EXTRACTED",
+        title="[bold bright_yellow] LOOT EXTRACTED [/]",
         border_style="bright_yellow",
         padding=(1, 2),
     )
@@ -643,7 +643,7 @@ def display_attack_paths(state: ScanState) -> None:
     content = "\n".join(lines)
     panel = Panel(
         content,
-        title="⚔️ ATTACK PATHS",
+        title="[bold bright_red] SUGGESTED ATTACK PATHS [/]",
         border_style="bright_red",
         padding=(1, 2),
     )
@@ -665,7 +665,7 @@ def display_scan_summary(state: ScanState) -> None:
     console = get_console()
 
     console.print()
-    console.rule("[bold bright_green]🥷 Scan Complete", style="bright_green")
+    console.rule("[bold bright_green] Scan Complete ", style="bright_green")
     console.print()
 
     # --- Ports & services ---
@@ -770,7 +770,7 @@ def _display_footer(state: ScanState) -> None:
 
     panel = Panel(
         footer_text,
-        title="📊 SCAN SUMMARY",
+        title="[bold bright_green] SCAN SUMMARY [/]",
         border_style="bright_green",
         padding=(1, 2),
     )
@@ -842,7 +842,7 @@ def create_phase_progress(phase_name: str) -> Progress:
         A configured Progress instance with one indeterminate task.
     """
     progress = Progress(
-        SpinnerColumn("earth"),
+        SpinnerColumn("dots"),
         TextColumn("[bold bright_yellow]{task.description}"),
         BarColumn(bar_width=None),
         TimeElapsedColumn(),

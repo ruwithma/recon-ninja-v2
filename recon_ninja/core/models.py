@@ -34,11 +34,11 @@ class Severity(str, Enum):
     def icon(self) -> str:
         """Rich-compatible icon for display."""
         return {
-            "CRITICAL": "🔴",
-            "HIGH": "🟠",
-            "MEDIUM": "🟡",
-            "LOW": "🔵",
-            "INFO": "⚪",
+            "CRITICAL": "[CRIT]",
+            "HIGH": "[HIGH]",
+            "MEDIUM": "[MED ]",
+            "LOW": "[LOW ]",
+            "INFO": "[INFO]",
         }[self.value]
 
     @property

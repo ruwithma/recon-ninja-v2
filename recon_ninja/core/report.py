@@ -254,10 +254,10 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <div class="container">
 
-<h1>🥷 ReconNinja Report — {{ target }}</h1>
+<h1>ReconNinja Report — {{ target }}</h1>
 
 <!-- Target Information -->
-<h2>🎯 Target Information</h2>
+<h2>Target Information</h2>
 <table class="meta-table">
   <tr><td>Target</td><td>{{ target }}</td></tr>
   <tr><td>Hostname</td><td>{{ hostname or "—" }}</td></tr>
@@ -268,7 +268,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 </table>
 
 <!-- Open Ports & Services -->
-<h2>🌐 Open Ports &amp; Services</h2>
+<h2>Open Ports &amp; Services</h2>
 {% if services %}
 <table>
   <tr>
@@ -289,14 +289,14 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endif %}
 
 <!-- Box Profile -->
-<h2>📦 Box Profile</h2>
+<h2>Box Profile</h2>
 <p><span class="profile-badge">{{ box_profile }}</span></p>
 
 <!-- Detected Technologies -->
-<h2>🔬 Detected Technologies</h2>
+<h2>Detected Technologies</h2>
 {% if detected_techs %}
 {% for port_data in tech_by_port %}
-<h3>🌐 Port {{ port_data.port }}</h3>
+<h3>Port {{ port_data.port }}</h3>
 <table>
   <tr>
     <th>Technology</th><th>Version</th><th>Category</th><th>Confidence</th><th>Source</th><th>Vulnerable</th><th>CVEs</th>
@@ -316,7 +316,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endfor %}
 {% if vulnerable_techs %}
 <div class="finding-card critical" style="margin-top:1rem">
-  <span class="finding-title">⚠️ Vulnerable Technologies Detected</span>
+  <span class="finding-title">Vulnerable Technologies Detected</span>
   <div class="finding-desc" style="margin-top:0.5rem">
   {% for vt in vulnerable_techs %}
     <div style="margin-bottom:0.4rem">
@@ -332,7 +332,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endif %}
 
 <!-- Key Findings -->
-<h2>🔥 Key Findings</h2>
+<h2>Key Findings</h2>
 {% if findings %}
 {% for finding in findings %}
 <div class="finding-card {{ finding.severity | lower }}">
@@ -352,7 +352,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endif %}
 
 <!-- Per-Service Details -->
-<h2>📋 Per-Service Details</h2>
+<h2>Per-Service Details</h2>
 {% for svc_detail in service_details %}
 <h3>{{ svc_detail.icon }} {{ svc_detail.label }} (port {{ svc_detail.port }})</h3>
 {% if svc_detail.product %}
@@ -385,7 +385,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endfor %}
 
 <!-- Loot -->
-<h2>💰 Loot</h2>
+<h2>Loot</h2>
 {% if loot %}
 <div class="loot-grid">
   {% for category, items in loot.items() %}
@@ -400,7 +400,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endif %}
 
 <!-- Suggested Attack Paths -->
-<h2>⚔️ Suggested Attack Paths</h2>
+<h2>Suggested Attack Paths</h2>
 {% if attack_commands %}
 {% for cmd in attack_commands %}
 <div class="command-block">{{ loop.index }}. {{ cmd }}</div>
@@ -410,7 +410,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 {% endif %}
 
 <!-- Raw Output File Index -->
-<h2>📁 Raw Output File Index</h2>
+<h2>Raw Output File Index</h2>
 {% if output_files %}
 <ul class="file-index">
   {% for f in output_files %}
@@ -480,7 +480,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append(f"# ReconNinja Report — {state.target} — {now}\n")
 
     # 2. Target Information
-    lines.append("## 🎯 Target Information\n")
+    lines.append("## Target Information\n")
     lines.append("| Field | Value |")
     lines.append("|-------|-------|")
     lines.append(f"| **Target** | `{state.target}` |")
@@ -494,7 +494,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 3. Open Ports & Services
-    lines.append("## 🌐 Open Ports & Services\n")
+    lines.append("## Open Ports & Services\n")
     if state.services:
         lines.append("| Port | Proto | Service | Product | Version |")
         lines.append("|------|-------|---------|---------|---------|")
@@ -510,11 +510,11 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 4. Box Profile
-    lines.append("## 📦 Box Profile\n")
+    lines.append("## Box Profile\n")
     lines.append(f"**{state.box_profile}**\n")
 
     # 4.5 Tech Stack
-    lines.append("## 🔬 Detected Technologies\n")
+    lines.append("## Detected Technologies\n")
     if state.detected_techs:
         # Group by port
         ports_with_techs = sorted({t.port for t in state.detected_techs})
@@ -524,7 +524,7 @@ def _build_markdown(state: ScanState) -> str:
             lines.append("| Technology | Version | Category | Confidence | Source | Vulnerable | CVEs |")
             lines.append("|------------|---------|----------|------------|--------|------------|------|")
             for tech in port_techs:
-                vuln_badge = "🔴 Yes" if tech.is_vulnerable else "—"
+                vuln_badge = "Yes" if tech.is_vulnerable else "—"
                 cves = ", ".join(tech.cves) if tech.cves else "—"
                 lines.append(
                     f"| {tech.name} | {tech.version or '—'} | {tech.category or '—'} | "
@@ -535,7 +535,7 @@ def _build_markdown(state: ScanState) -> str:
         # Vulnerable techs summary
         vulnerable = state.vulnerable_techs()
         if vulnerable:
-            lines.append("### ⚠️ Vulnerable Technologies\n")
+            lines.append("### Vulnerable Technologies\n")
             for vtech in vulnerable:
                 cve_list = ", ".join(vtech.cves)
                 lines.append(
@@ -551,7 +551,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 5. Key Findings
-    lines.append("## 🔥 Key Findings\n")
+    lines.append("## Key Findings\n")
     sorted_findings = sorted(state.all_findings, key=lambda f: f.severity.rank)
     if sorted_findings:
         for finding in sorted_findings:
@@ -568,11 +568,11 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 6. Per-Service Details
-    lines.append("## 📋 Per-Service Details\n")
+    lines.append("## Per-Service Details\n")
     _write_service_details_md(lines, state)
 
     # 7. Loot
-    lines.append("## 💰 Loot\n")
+    lines.append("## Loot\n")
     loot = _extract_loot(state)
     if loot:
         lines.append("| Category | Count |")
@@ -584,7 +584,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 8. Suggested Attack Paths
-    lines.append("## ⚔️ Suggested Attack Paths\n")
+    lines.append("## Suggested Attack Paths\n")
     # Combine finding-level commands with context-aware attack paths
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
     context_cmds = _generate_attack_paths(state)
@@ -597,7 +597,7 @@ def _build_markdown(state: ScanState) -> str:
     lines.append("")
 
     # 9. Raw Output File Index
-    lines.append("## 📁 Raw Output File Index\n")
+    lines.append("## Raw Output File Index\n")
     output_files = _collect_output_files(state)
     if output_files:
         for fpath in sorted(output_files):
@@ -623,21 +623,21 @@ def _write_service_details_md(lines: list[str], state: ScanState) -> None:
         service_groups.setdefault(group, []).append(svc)
 
     icons: dict[str, str] = {
-        "Web": "🌐",
-        "SMB": "📂",
-        "SSH": "🔐",
-        "FTP": "📁",
-        "DNS": "🔍",
-        "SMTP": "📧",
-        "LDAP": "🏛️",
-        "Kerberos": "🎫",
-        "RDP": "🖥️",
-        "VNC": "📺",
-        "NFS": "💿",
-        "SNMP": "📡",
-        "Database": "🗄️",
-        "SSL": "🔒",
-        "Other": "❓",
+        "Web": "",
+        "SMB": "",
+        "SSH": "",
+        "FTP": "",
+        "DNS": "",
+        "SMTP": "",
+        "LDAP": "",
+        "Kerberos": "",
+        "RDP": "",
+        "VNC": "",
+        "NFS": "",
+        "SNMP": "",
+        "Database": "",
+        "SSL": "",
+        "Other": "",
     }
 
     for group_name, svcs in sorted(service_groups.items()):
@@ -728,10 +728,10 @@ def _build_html(state: ScanState) -> str:
         svc = state.services[port]
         group = _service_group(svc.service, svc.port)
         icon_map = {
-            "Web": "🌐", "SMB": "📂", "SSH": "🔐", "FTP": "📁",
-            "DNS": "🔍", "SMTP": "📧", "LDAP": "🏛️", "Kerberos": "🎫",
-            "RDP": "🖥️", "VNC": "📺", "NFS": "💿", "SNMP": "📡",
-            "Database": "🗄️", "SSL": "🔒", "Other": "❓",
+            "Web": "", "SMB": "", "SSH": "", "FTP": "",
+            "DNS": "", "SMTP": "", "LDAP": "", "Kerberos": "",
+            "RDP": "", "VNC": "", "NFS": "", "SNMP": "",
+            "Database": "", "SSL": "", "Other": "",
         }
         detail: dict[str, Any] = {
             "port": svc.port,
@@ -1013,7 +1013,7 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
     for vtech in vulnerable:
         cves = ", ".join(vtech.cves)
         commands.append(
-            f"# ⚠️ {vtech.name} {vtech.version} is VULNERABLE ({cves}) — "
+            f"# [!] {vtech.name} {vtech.version} is VULNERABLE ({cves}) — "
             f"searchsploit {vtech.name} {vtech.version}"
         )
 

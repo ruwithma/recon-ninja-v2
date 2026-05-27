@@ -552,13 +552,13 @@ class ToolInstaller:
     def _print_install_result(self, result: InstallResult) -> None:
         """Print a single install result with color coding."""
         if result.status == "installed":
-            self.console.print(f"  [green]✔[/] [bold]{result.tool_name}[/] — {result.message}")
+            self.console.print(f"  [green][+][/] [bold]{result.tool_name}[/] — {result.message}")
         elif result.status == "already_installed":
-            self.console.print(f"  [dim]✔[/] [dim]{result.tool_name}[/] — {result.message}")
+            self.console.print(f"  [dim][+][/] [dim]{result.tool_name}[/] — {result.message}")
         elif result.status == "skipped":
-            self.console.print(f"  [yellow]⊘[/] [dim]{result.tool_name}[/] — [yellow]{result.message}[/]")
+            self.console.print(f"  [yellow][-][/] [dim]{result.tool_name}[/] — [yellow]{result.message}[/]")
         elif result.status == "failed":
-            self.console.print(f"  [red]✘[/] [bold]{result.tool_name}[/] — [red]{result.message}[/]")
+            self.console.print(f"  [red][x][/] [bold]{result.tool_name}[/] — [red]{result.message}[/]")
 
     def install_all(self, *, include_optional: bool = True) -> list[InstallResult]:
         """Install all tools (required + optional).
@@ -574,7 +574,7 @@ class ToolInstaller:
         # ── Banner ──────────────────────────────────────────────────────
         self.console.print()
         self.console.print(Panel(
-            "[bold]🥷 ReconNinja v2 — Tool Installer[/]\n\n"
+            "[bold] RECON_NINJA — Tool Installer [/]\n\n"
             f"  Package manager: [cyan]{self.pkg_mgr or 'not detected'}[/]\n"
             f"  Running as root: [cyan]{'yes' if is_root() else 'no'}[/]\n"
             f"  Include optional: [cyan]{'yes' if include_optional else 'no'}[/]",
@@ -583,7 +583,7 @@ class ToolInstaller:
 
         if not is_root():
             self.console.print(
-                "[yellow]⚠ Not running as root — some installs may fail. "
+                "[bold yellow][!][/] [yellow]Not running as root — some installs may fail. "
                 "Consider running with sudo.[/]"
             )
 
@@ -653,9 +653,9 @@ class ToolInstaller:
                     modified = True
 
             if modified:
-                self.console.print(f"  [green]✔[/] Updated {rc_file}")
+                self.console.print(f"  [green][+][/] Updated {rc_file}")
             else:
-                self.console.print(f"  [dim]✔[/] {rc_file} already configured")
+                self.console.print(f"  [dim][+][/] {rc_file} already configured")
 
         # Also add cargo env
         cargo_env = Path.home() / ".cargo" / "env"
@@ -670,7 +670,7 @@ class ToolInstaller:
                 if ".cargo/env" not in content:
                     with open(rc_file, "a", encoding="utf-8") as f:
                         f.write('\n# Added by ReconNinja installer\nsource "$HOME/.cargo/env"\n')
-                    self.console.print(f"  [green]✔[/] Added cargo env to {rc_file}")
+                    self.console.print(f"  [green][+][/] Added cargo env to {rc_file}")
 
     def print_summary(self, results: list[InstallResult] | None = None) -> None:
         """Print the final installation summary."""
@@ -693,18 +693,18 @@ class ToolInstaller:
             summary_lines.append("")
             summary_lines.append("  [bold red]Failed tools:[/]")
             for r in failed:
-                summary_lines.append(f"    [red]✘[/] {r.tool_name}: {r.message[:100]}")
+                summary_lines.append(f"    [red][x][/] {r.tool_name}: {r.message[:100]}")
 
         self.console.print(Panel(
             "\n".join(summary_lines),
-            title="[bold]📊 Installation Summary[/]",
+            title="[bold] Installation Summary [/]",
             border_style="green" if not failed else "yellow",
         ))
 
         if not failed:
             self.console.print()
             self.console.print(
-                "[bold green]✔ All tools installed successfully![/]"
+                "[bold green][+] All tools installed successfully![/]"
             )
             self.console.print(
                 "[dim]Run 'source ~/.bashrc' (or ~/.zshrc) to update your PATH, "

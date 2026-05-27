@@ -559,7 +559,7 @@ def format_tool_status(available: dict[str, bool]) -> str:
     table.add_column("Package", style="dim")
 
     def _status_icon(found: bool) -> Text:
-        return Text("✔", style="green") if found else Text("✘", style="red")
+        return Text("[+]", style="green") if found else Text("[x]", style="red")
 
     # Required tools first
     for tool, pkg in REQUIRED_TOOLS.items():
@@ -608,7 +608,7 @@ def format_detailed_status(tools: list[ToolInfo]) -> None:
         f"[bold]Required:[/] [green]{required_found}/{required_total}[/] found  "
         f"[bold]Optional:[/] [green]{optional_found}/{optional_total}[/] found  "
         f"[bold]Total:[/] [bold cyan]{total_found}/{total_tools}[/] available",
-        title="[bold]🥷 ReconNinja — Tool Inventory[/]",
+        title="[bold] TOOL INVENTORY [/]",
         border_style="cyan",
     ))
 
@@ -631,7 +631,7 @@ def format_detailed_status(tools: list[ToolInfo]) -> None:
             parts.append(f"[yellow]Missing optional:[/] {names}")
         console.print(Panel(
             "\n".join(parts) + "\n\n[dim]Run [bold]reconninja install[/] to install missing tools.[/]",
-            title="[bold yellow]⚠ Missing Tools[/]",
+            title="[bold yellow] Missing Tools [/]",
             border_style="yellow",
         ))
 
@@ -650,14 +650,14 @@ def _print_tool_table(console: Console, tools: list[ToolInfo], title: str) -> No
 
     for tool in tools:
         if tool.found:
-            status = Text("✔", style="green")
+            status = Text("[+]", style="green")
             version = tool.version or "—"
             path_display = tool.path or "—"
             # Shorten home dir
             if path_display.startswith(str(Path.home())):
                 path_display = path_display.replace(str(Path.home()), "~", 1)
         else:
-            status = Text("✘", style="red")
+            status = Text("[x]", style="red")
             version = ""
             path_display = ""
             # Show which_name if it's an alt match

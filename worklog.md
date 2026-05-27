@@ -161,3 +161,28 @@ Stage Summary:
 - Dynamic Ports: Added support for non-standard ports in Kerberos, LDAP, NFS, RDP, RPC, and SMB modules.
 - Non-Root Fallback: Fixed permission errors on nmap port/service scans when running as non-root.
 - Verified clean passes on pytest, mypy, and live fast scan against localhost.
+
+---
+Task ID: 6
+Agent: main
+Task: Visual Redesign of CLI and Reports for Retro-Cyberpunk/Hacker Aesthetic (Emoji Removal)
+
+Work Log:
+- Replaced circular emojis in Severity.icon with clean text-based tags: [CRIT], [HIGH], [MED ], [LOW ], [INFO].
+- Redesigned CLI banner in display.py to remove the ninja emoji and use a sleek RECON_NINJA v2 block header.
+- Replaced the phase header emoji ⚡ with a sleek >>> chevron pointer.
+- Replaced category emojis in _CATEGORY_ICONS with short text-based bracket tags ([LANG], [FW], [CMS], [SRV], [WAF], [LIB], [OS], [CDN], [DB], [AN], [OTHER]). If vulnerable, a bright red [!] is appended.
+- Updated the pre-flight checklist panel to use [+], [x], and [!] brackets instead of ✅/❌/⚠️.
+- Replaced loot categories emojis in _LOOT_ICONS with a clean colored [+] or [!] indicator.
+- Replaced the emoji spinner (earth) in single-phase progress displays with a clean dots text spinner.
+- Removed emojis from help text and app callbacks in main.py.
+- Updated checker.py status tables to use [+] (found) and [x] (missing) status brackets.
+- Cleaned up emojis and status ticks from installer.py output printing.
+- Cleaned up emojis in report.py generated HTML and Markdown templates.
+- Removed emojis from install.sh status print outputs.
+- Verified all 311 unit tests and mypy type checks pass successfully.
+
+Stage Summary:
+- Redesigned entire CLI output, installer, reports, and scripts to be completely emoji-free.
+- Styled status labels and warnings with professional cyberpunk status brackets ([+], [x], [!]).
+- Verified all unit tests and static types are green.

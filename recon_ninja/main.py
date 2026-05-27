@@ -1,4 +1,4 @@
-"""🥷 ReconNinja v2 — CLI entry point.
+"""ReconNinja v2 — CLI entry point.
 
 This module defines the ``app`` Typer application that serves as the main
 entry point referenced in ``pyproject.toml``::
@@ -87,7 +87,7 @@ class ReconNinjaGroup(TyperGroup):
 
 app = typer.Typer(
     name="reconninja",
-    help="🥷 Automated reconnaissance tool for CTFs and pentesting",
+    help="Automated reconnaissance tool for CTFs and pentesting",
     add_completion=False,
     rich_markup_mode="rich",
     cls=ReconNinjaGroup,
@@ -99,7 +99,7 @@ def _main(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", "-V", help="Show version"),
 ) -> None:
-    """🥷 ReconNinja v2 — Automated reconnaissance for CTFs and pentesting."""
+    """RECON_NINJA v2 — Automated reconnaissance for CTFs and pentesting."""
     if version:
         console.print(f"reconninja v{__version__}")
         raise typer.Exit()
@@ -316,15 +316,15 @@ def _display_preflight(
 
     table.add_row("Target", f"[cyan]{target}[/cyan] → [dim]{resolved_ip}[/dim]")
 
-    root_icon = "✔ [green]root[/green]" if is_root_user else "✘ [yellow]non-root (some scans limited)[/yellow]"
+    root_icon = "[bold green][+][/] [green]root[/]" if is_root_user else "[bold yellow][!][/] [yellow]non-root (some scans limited)[/]"
     table.add_row("Privileges", root_icon)
 
     if vpn_ok is not None:
         vpn_up, vpn_ip = vpn_ok
         if vpn_up:
-            table.add_row("VPN", f"✔ [green]{vpn_ip}[/green]")
+            table.add_row("VPN", f"[bold green][+][/] [green]{vpn_ip}[/green]")
         else:
-            table.add_row("VPN", f"✘ [red]{vpn_ip}[/red]")
+            table.add_row("VPN", f"[bold red][x][/] [red]{vpn_ip}[/red]")
 
     missing = get_missing_required(tools)
     total = len(tools)
@@ -334,7 +334,7 @@ def _display_preflight(
         tool_status += f" [red](missing: {', '.join(missing)})[/red]"
     table.add_row("Tools", tool_status)
 
-    seclists_status = f"✔ [green]{seclists_path}[/green]" if seclists_path else "✘ [yellow]not found[/yellow]"
+    seclists_status = f"[bold green][+][/] [green]{seclists_path}[/green]" if seclists_path else "[bold yellow][!][/] [yellow]not found[/yellow]"
     table.add_row("SecLists", seclists_status)
 
     table.add_row("Output", str(output_dir))
@@ -388,7 +388,7 @@ def scan_cmd(
     proxy: Optional[str] = typer.Option(None, "--proxy", help="HTTP proxy URL"),
     version: bool = typer.Option(False, "--version", help="Show version"),
 ) -> None:
-    """🥷 Run a reconnaissance scan against a target.
+    """Run a reconnaissance scan against a target.
 
     Usage: reconninja <target>  OR  reconninja scan <target>
     """
@@ -460,7 +460,7 @@ def scan_cmd(
     missing_required = get_missing_required(tools)
     if missing_required and not quiet:
         err_console.print(
-            f"[yellow]⚠ Missing required tools:[/yellow] {', '.join(missing_required)}\n"
+            f"[bold yellow][!][/] [yellow]Missing required tools:[/yellow] {', '.join(missing_required)}\n"
             f"[dim]Run 'reconninja install' to install them, "
             f"or 'reconninja check-tools' for details.[/dim]"
         )
@@ -542,7 +542,7 @@ def scan_cmd(
         state = state_manager.load_state()
         if state is None:
             err_console.print(
-                "[yellow]⚠ --resume specified but no checkpoint found. "
+                "[bold yellow][!][/] [yellow]--resume specified but no checkpoint found. "
                 "Starting fresh scan.[/yellow]"
             )
             state = state_manager.init_state()
@@ -592,7 +592,7 @@ def scan_cmd(
     try:
         final_state = asyncio.run(engine.run())
     except KeyboardInterrupt:
-        console.print("\n[yellow]⚠ Scan interrupted by user. State saved for --resume.[/yellow]")
+        console.print("\n[bold yellow][!][/] [yellow]Scan interrupted by user. State saved for --resume.[/yellow]")
         state.save()
         raise typer.Exit(code=130)
     except Exception as exc:
@@ -617,7 +617,7 @@ def scan_cmd(
                 console.print(f"[dim]Added {resolved_ip} → {hostname} to /etc/hosts[/dim]")
             elif not quiet:
                 err_console.print(
-                    f"[yellow]⚠ Failed to add {hostname} to /etc/hosts[/yellow]"
+                    f"[bold yellow][!][/] [yellow]Failed to add {hostname} to /etc/hosts[/yellow]"
                 )
 
     # Final output path hint
@@ -634,7 +634,7 @@ def scan_cmd(
 def check_tools_cmd(
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show detailed output with paths and versions"),
 ) -> None:
-    """🔍 Check which external tools are installed and show versions.
+    """Check which external tools are installed and show versions.
 
     Scans for all 30+ external tools that ReconNinja uses, detects
     their versions, and displays a detailed status report.
@@ -656,7 +656,7 @@ def install_cmd(
     optional_only: bool = typer.Option(False, "--optional", help="Install only optional tools"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Show detailed output"),
 ) -> None:
-    """📦 Auto-install all tools that ReconNinja needs.
+    """Auto-install all tools that ReconNinja needs.
 
     Detects your OS and package manager, then installs tools using:
       - System package manager (apt/dnf/pacman)

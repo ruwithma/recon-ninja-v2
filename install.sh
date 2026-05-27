@@ -26,11 +26,11 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-ok()   { echo -e "${GREEN}✅  $1${NC}"; }
-warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
-fail() { echo -e "${RED}❌  $1${NC}"; }
-info() { echo -e "${CYAN}ℹ️  $1${NC}"; }
-header() { echo -e "\n${BOLD}${CYAN}━━━ $1 ━━━${NC}\n"; }
+ok()   { echo -e "${GREEN}[+]  $1${NC}"; }
+warn() { echo -e "${YELLOW}[!]  $1${NC}"; }
+fail() { echo -e "${RED}[x]  $1${NC}"; }
+info() { echo -e "${CYAN}[*]  $1${NC}"; }
+header() { echo -e "\n${BOLD}${CYAN}>>> $1${NC}\n"; }
 
 # ---------------------------------------------------------------------------
 # Track what was installed vs missing
@@ -421,24 +421,24 @@ fi
 # ---------------------------------------------------------------------------
 header "Installation Summary"
 
-echo -e "${BOLD}✅ Installed successfully (${#INSTALLED[@]}):${NC}"
+echo -e "${BOLD}[+] Installed successfully (${#INSTALLED[@]}):${NC}"
 for item in "${INSTALLED[@]}"; do
-    echo -e "  ${GREEN}✅${NC}  $item"
+    echo -e "  ${GREEN}[+]${NC}  $item"
 done
 
 if [[ ${#OPTIONAL_MISSING[@]} -gt 0 ]]; then
     echo ""
-    echo -e "${BOLD}⚠️  Optional / failed but not critical (${#OPTIONAL_MISSING[@]}):${NC}"
+    echo -e "${BOLD}[!] Optional / failed but not critical (${#OPTIONAL_MISSING[@]}):${NC}"
     for item in "${OPTIONAL_MISSING[@]}"; do
-        echo -e "  ${YELLOW}⚠️${NC}  $item"
+        echo -e "  ${YELLOW}[!]${NC}  $item"
     done
 fi
 
 if [[ ${#REQUIRED_MISSING[@]} -gt 0 ]]; then
     echo ""
-    echo -e "${BOLD}❌ Required but failed (${#REQUIRED_MISSING[@]}):${NC}"
+    echo -e "${BOLD}[x] Required but failed (${#REQUIRED_MISSING[@]}):${NC}"
     for item in "${REQUIRED_MISSING[@]}"; do
-        echo -e "  ${RED}❌${NC}  $item"
+        echo -e "  ${RED}[x]${NC}  $item"
     done
 fi
 
