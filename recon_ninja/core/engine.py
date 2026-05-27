@@ -716,23 +716,32 @@ class ReconEngine:
     async def phase7_report(self) -> None:
         """Generate final reports in multiple formats.
 
-        Produces:
-            * ``report.json`` — Full structured state dump.
-            * ``report.md``  — Human-readable Markdown summary.
+        Delegates to :func:`recon_ninja.core.report.generate_reports` for
+        comprehensive Markdown, HTML (opt-in), and JSON output.  Also
+        writes a raw ``state.json`` for checkpoint / resume purposes.
         """
-        # --- JSON report ---
-        json_report = self.output_dir / "report.json"
-        json_report.write_text(
+        from recon_ninja.core.report import generate_reports
+
+        # Determine whether HTML report was requested
+        html = self.config.module_toggles.get("_html_report", False)
+        json_output = self.config.module_toggles.get("_json_report", True)
+
+        generated = await generate_reports(
+            state=self.state,
+            output_dir=self.output_dir,
+            html=html,
+            json_output=json_output,
+        )
+        for fmt_name, path in generated.items():
+            logger.info("%s report → %s", fmt_name.capitalize(), path)
+
+        # Always write raw state.json for checkpoint / resume
+        state_file = self.output_dir / "state.json"
+        state_file.write_text(
             __import__("json").dumps(self.state.to_dict(), indent=2),
             encoding="utf-8",
         )
-        logger.info("JSON report → %s", json_report)
-
-        # --- Markdown report ---
-        md_lines = self._build_markdown_report()
-        md_report = self.output_dir / "report.md"
-        md_report.write_text("\n".join(md_lines), encoding="utf-8")
-        logger.info("Markdown report → %s", md_report)
+        logger.info("State checkpoint → %s", state_file)
 
     def _build_markdown_report(self) -> list[str]:
         """Build a Markdown report as a list of lines."""

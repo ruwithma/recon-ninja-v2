@@ -50,6 +50,14 @@ def validate_target(target: str) -> tuple[bool, str]:
 
     target = target.strip()
 
+    # --- CIDR ---
+    if "/" in target:
+        try:
+            network = ipaddress.IPv4Network(target, strict=False)
+            return True, str(network.network_address)
+        except (ipaddress.AddressValueError, ValueError):
+            return False, f"Invalid CIDR notation: {target}"
+
     # --- IPv4 ---
     if _IPV4_RE.match(target):
         octets = target.split(".")
