@@ -7,6 +7,11 @@
 #
 # Usage:
 #   chmod +x install.sh && sudo ./install.sh
+#
+# Alternatively, use the built-in Python installer:
+#   sudo recon-ninja install          # Install all tools
+#   sudo recon-ninja install --required  # Install only required tools
+#   recon-ninja check-tools           # Check what's installed
 # =============================================================================
 
 set -euo pipefail

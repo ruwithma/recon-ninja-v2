@@ -4,6 +4,12 @@ This module defines the ``app`` Typer application that serves as the main
 entry point referenced in ``pyproject.toml``::
 
     recon-ninja = "recon_ninja.main:app"
+
+CLI commands:
+    - ``recon-ninja <target>``  — run a scan (default when a target is given)
+    - ``recon-ninja scan <target>`` — explicit scan command
+    - ``recon-ninja install``   — auto-install all required/optional tools
+    - ``recon-ninja check-tools`` — check tool availability with version info
 """
 
 from __future__ import annotations
@@ -11,11 +17,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import click
 import typer
+from typer.core import TyperGroup
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -26,7 +35,12 @@ from recon_ninja.core.config import load_config, MergeConfig
 from recon_ninja.core.engine import ReconEngine, PHASE_NAMES
 from recon_ninja.core.models import ReconConfig, ScanState
 from recon_ninja.core.state import StateManager
-from recon_ninja.utils.checker import check_tools, get_missing_required
+from recon_ninja.utils.checker import (
+    check_tools,
+    check_tools_detailed,
+    format_detailed_status,
+    get_missing_required,
+)
 from recon_ninja.utils.hosts import add_to_hosts
 from recon_ninja.utils.network import (
     check_vpn_interface,
@@ -36,7 +50,41 @@ from recon_ninja.utils.network import (
 from recon_ninja.utils.wordlists import find_seclists
 
 # ---------------------------------------------------------------------------
-# Typer application
+# Custom Click group — routes bare args to the 'scan' command
+# ---------------------------------------------------------------------------
+
+
+class ReconNinjaGroup(TyperGroup):
+    """Custom Click group that treats unknown first arguments as scan targets.
+
+    If the first positional argument doesn't match a known subcommand,
+    it is automatically routed to the ``scan`` command so that
+    ``recon-ninja 10.10.10.1`` works the same as
+    ``recon-ninja scan 10.10.10.1``.
+    """
+
+    def resolve_command(self, ctx: click.Context, args: list[str]) -> tuple[str | None, click.Command | None, list[str]]:
+        """Override command resolution to default to 'scan'."""
+        # If there are no args, just show help
+        if not args:
+            return super().resolve_command(ctx, args)
+
+        # Known subcommands
+        cmd_name = args[0]
+        known_commands = set(self.list_commands(ctx))
+
+        # If the first arg matches a known command, use it normally
+        if cmd_name in known_commands:
+            return super().resolve_command(ctx, args)
+
+        # If first arg starts with '-', it's a flag — route to scan
+        # If first arg looks like a target (IP, hostname, CIDR), route to scan
+        # This handles: recon-ninja 10.10.10.1, recon-ninja --fast 10.10.10.1
+        return super().resolve_command(ctx, ["scan"] + args)
+
+
+# ---------------------------------------------------------------------------
+# Typer application with custom group
 # ---------------------------------------------------------------------------
 
 app = typer.Typer(
@@ -44,7 +92,19 @@ app = typer.Typer(
     help="🥷 Automated reconnaissance tool for CTFs and pentesting",
     add_completion=False,
     rich_markup_mode="rich",
+    cls=ReconNinjaGroup,
 )
+
+
+@app.callback(invoke_without_command=True)
+def _main(
+    ctx: typer.Context,
+    version: bool = typer.Option(False, "--version", "-V", help="Show version"),
+) -> None:
+    """🥷 Recon Ninja v2 — Automated reconnaissance for CTFs and pentesting."""
+    if version:
+        console.print(f"recon-ninja v{__version__}")
+        raise typer.Exit()
 
 console = Console()
 err_console = Console(stderr=True)
@@ -96,10 +156,6 @@ def _build_cli_overrides(
             "stealth_mode": stealth,
         },
     }
-    if no_osint:
-        # Handled directly in ReconConfig below, but also record for
-        # consistency if a module inspects MergeConfig directly.
-        pass
     return overrides
 
 
@@ -141,7 +197,6 @@ def _build_recon_config(
 ) -> ReconConfig:
     """Build a :class:`ReconConfig` from the merged file config + CLI flags."""
 
-    # Start from MergeConfig defaults
     cfg = ReconConfig(
         fast_mode=fast,
         udp_scan=udp or merge_cfg.scan.udp_enabled,
@@ -154,9 +209,7 @@ def _build_recon_config(
     module_toggles: dict[str, bool] = {}
 
     if only_web:
-        # Only the web module runs
         module_toggles["web"] = True
-        # Disable everything else explicitly
         for name in ("smb", "ssh", "ftp", "smtp", "snmp", "dns", "ldap",
                       "kerberos", "rpc", "nfs", "rdp", "vnc", "winrm",
                       "database", "ssl"):
@@ -172,19 +225,16 @@ def _build_recon_config(
         if no_vuln:
             cfg.skip_vuln_correlate = True
         if only_ports:
-            # Only phases 1+2 — skip everything after
             cfg.skip_vuln_correlate = True
             cfg.skip_loot = True
             cfg.osint_enabled = False
 
-    # --full enables optional modules
     if full:
         module_toggles["nuclei"] = True
         module_toggles["amass"] = True
         module_toggles["theHarvester"] = True
         module_toggles["testssl"] = True
 
-    # --aggressive enables potentially disruptive checks
     if aggressive:
         module_toggles["aggressive_checks"] = True
 
@@ -207,7 +257,6 @@ def _build_recon_config(
     cfg.extra_nmap_flags = extra_flags
 
     # --- Wordlists --------------------------------------------------------
-    seclists_base = merge_cfg.wordlists.seclists_base
     if wordlist:
         cfg.web_wordlist = wordlist
     else:
@@ -216,7 +265,6 @@ def _build_recon_config(
     cfg.dns_wordlist = merge_cfg.wordlists.vhosts_path
 
     # --- Domain detection -------------------------------------------------
-    # If the target starts with a letter, treat it as a domain (not an IP).
     cfg.is_domain = bool(re.match(r"^[a-zA-Z]", target))
 
     return cfg
@@ -232,11 +280,7 @@ def _create_output_dir(
     output: Optional[Path],
     timestamp_dirs: bool,
 ) -> Path:
-    """Create and return the output directory path.
-
-    If *output* is provided, use it directly.  Otherwise build a path under
-    ``results/<target>/`` with an optional timestamp suffix.
-    """
+    """Create and return the output directory path."""
     if output is not None:
         out = output
     else:
@@ -271,14 +315,11 @@ def _display_preflight(
     table.add_column("Item", style="bold")
     table.add_column("Status")
 
-    # Target
     table.add_row("Target", f"[cyan]{target}[/cyan] → [dim]{resolved_ip}[/dim]")
 
-    # Root
     root_icon = "✔ [green]root[/green]" if is_root_user else "✘ [yellow]non-root (some scans limited)[/yellow]"
     table.add_row("Privileges", root_icon)
 
-    # VPN
     if vpn_ok is not None:
         vpn_up, vpn_ip = vpn_ok
         if vpn_up:
@@ -286,7 +327,6 @@ def _display_preflight(
         else:
             table.add_row("VPN", f"✘ [red]{vpn_ip}[/red]")
 
-    # Tools
     missing = get_missing_required(tools)
     total = len(tools)
     available = sum(1 for v in tools.values() if v)
@@ -295,11 +335,9 @@ def _display_preflight(
         tool_status += f" [red](missing: {', '.join(missing)})[/red]"
     table.add_row("Tools", tool_status)
 
-    # SecLists
     seclists_status = f"✔ [green]{seclists_path}[/green]" if seclists_path else "✘ [yellow]not found[/yellow]"
     table.add_row("SecLists", seclists_status)
 
-    # Output
     table.add_row("Output", str(output_dir))
 
     console.print(Panel(table, title="[bold]Pre-flight Checklist[/bold]", border_style="cyan"))
@@ -325,7 +363,6 @@ def _display_summary(state: ScanState) -> None:
         border_style="green",
     ))
 
-    # Findings breakdown by severity
     if state.all_findings:
         from recon_ninja.core.models import Severity
         by_sev = state.findings_by_severity()
@@ -344,13 +381,12 @@ def _display_summary(state: ScanState) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Main command — the primary CLI entry point
+# Scan command — the primary scan entry point
 # ---------------------------------------------------------------------------
 
 
-@app.command()
-def main(
-    ctx: typer.Context,
+@app.command(name="scan")
+def scan_cmd(
     target: Optional[str] = typer.Argument(None, help="Target IP, hostname, or CIDR"),
     # Scan control
     fast: bool = typer.Option(False, "--fast", help="Port scan + basic service enum only"),
@@ -390,7 +426,10 @@ def main(
     proxy: Optional[str] = typer.Option(None, "--proxy", help="HTTP proxy URL"),
     version: bool = typer.Option(False, "--version", help="Show version"),
 ) -> None:
-    """🥷 Recon Ninja v2 — Automated reconnaissance for CTFs and pentesting."""
+    """🥷 Run a reconnaissance scan against a target.
+
+    Usage: recon-ninja <target>  OR  recon-ninja scan <target>
+    """
 
     # ------------------------------------------------------------------
     # 1. Version
@@ -403,7 +442,12 @@ def main(
     # 2. No target → help
     # ------------------------------------------------------------------
     if target is None:
-        console.print(ctx.get_help())
+        console.print("Usage: recon-ninja <target> [OPTIONS]")
+        console.print("       recon-ninja scan <target> [OPTIONS]")
+        console.print("       recon-ninja check-tools")
+        console.print("       recon-ninja install")
+        console.print()
+        console.print("Run [bold]recon-ninja --help[/] for full options.")
         raise typer.Exit()
 
     # ------------------------------------------------------------------
@@ -455,7 +499,8 @@ def main(
     if missing_required and not quiet:
         err_console.print(
             f"[yellow]⚠ Missing required tools:[/yellow] {', '.join(missing_required)}\n"
-            f"[dim]Some functionality will be unavailable.[/dim]"
+            f"[dim]Run 'recon-ninja install' to install them, "
+            f"or 'recon-ninja check-tools' for details.[/dim]"
         )
 
     # 3f. SecLists check
@@ -514,8 +559,7 @@ def main(
         proxy=proxy,
     )
 
-    # Store extra CLI context that ReconConfig doesn't natively hold
-    # on the config object for downstream modules to inspect.
+    # Store extra CLI context
     recon_config.module_toggles["_html_report"] = html
     recon_config.module_toggles["_json_report"] = json_output
     if creds:
@@ -546,11 +590,9 @@ def main(
                     f"[green]Resuming scan from phase {state.current_phase} "
                     f"({PHASE_NAMES.get(state.current_phase, '?')})[/green]"
                 )
-            # Update output_dir if it changed (e.g. user passed -o this time)
             state.output_dir = output_dir
     else:
         state = state_manager.init_state()
-        # Override the output_dir set by StateManager with our timestamped dir
         state.output_dir = output_dir
 
     # Seed available tools into state
@@ -560,11 +602,10 @@ def main(
     # 5. Create engine and run
     # ------------------------------------------------------------------
 
-    # Set up logging verbosity
     log_level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
+        format="%(asctime)s [%(levelname]-7s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
 
@@ -603,3 +644,60 @@ def main(
     # Final output path hint
     if not quiet:
         console.print(f"\n[dim]Results saved to: {final_state.output_dir}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: check-tools
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="check-tools")
+def check_tools_cmd(
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Show detailed output with paths and versions"),
+) -> None:
+    """🔍 Check which external tools are installed and show versions.
+
+    Scans for all 30+ external tools that Recon Ninja uses, detects
+    their versions, and displays a detailed status report.
+    """
+    _print_banner()
+
+    tools = check_tools_detailed()
+    format_detailed_status(tools)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: install
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="install")
+def install_cmd(
+    required_only: bool = typer.Option(False, "--required", help="Install only required tools"),
+    optional_only: bool = typer.Option(False, "--optional", help="Install only optional tools"),
+    verbose: bool = typer.Option(False, "-v", "--verbose", help="Show detailed output"),
+) -> None:
+    """📦 Auto-install all tools that Recon Ninja needs.
+
+    Detects your OS and package manager, then installs tools using:
+      - System package manager (apt/dnf/pacman)
+      - Go install (for Go-based tools)
+      - pip install (for Python-based tools)
+      - cargo install (for Rust-based tools)
+      - gem install (for Ruby-based tools)
+      - git clone (for tools distributed via Git)
+
+    Run with sudo for best results.  Already-installed tools are skipped.
+    """
+    _print_banner()
+
+    from recon_ninja.utils.installer import ToolInstaller
+
+    installer = ToolInstaller(verbose=verbose)
+
+    if required_only:
+        results = installer.install_required_only()
+    else:
+        results = installer.install_all(include_optional=True)
+
+    installer.print_summary(results)

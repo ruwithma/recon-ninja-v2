@@ -1,0 +1,9 @@
+{
+  "target": "127.0.0.1",
+  "scan_time": "2026-05-27T09:48:23.145962",
+  "box_profile": "UNKNOWN",
+  "open_ports": [],
+  "services": {},
+  "findings": [],
+  "loot": {}
+}
