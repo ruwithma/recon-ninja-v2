@@ -25,6 +25,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.modules.web.web_core import run_web_core
+from recon_ninja.modules.web.web_tech import run_web_tech
 from recon_ninja.modules.web.web_dirfuzz import run_web_dirfuzz
 from recon_ninja.modules.web.web_vuln import run_web_vuln
 from recon_ninja.modules.web.web_cms import run_web_cms
@@ -80,19 +81,24 @@ async def _scan_port(
     core_result = await run_web_core(target, port, url, state, config, port_dir)
     results.append(core_result)
 
-    # Step 2 — Directory / file fuzzing
+    # Step 2 — Deep technology detection
+    logger.info("[web:%d] Running web_tech …", port)
+    tech_result = await run_web_tech(target, port, url, state, config, port_dir)
+    results.append(tech_result)
+
+    # Step 3 — Directory / file fuzzing
     logger.info("[web:%d] Running web_dirfuzz …", port)
     dirfuzz_result = await run_web_dirfuzz(
         target, port, url, hostname, state, config, port_dir,
     )
     results.append(dirfuzz_result)
 
-    # Step 3 — Vulnerability scanning
+    # Step 4 — Vulnerability scanning
     logger.info("[web:%d] Running web_vuln …", port)
     vuln_result = await run_web_vuln(target, port, url, state, config, port_dir)
     results.append(vuln_result)
 
-    # Step 4 — CMS detection & API discovery
+    # Step 5 — CMS detection & API discovery
     logger.info("[web:%d] Running web_cms …", port)
     cms_result = await run_web_cms(target, port, url, state, config, port_dir)
     results.append(cms_result)

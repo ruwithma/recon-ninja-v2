@@ -32,6 +32,7 @@ from recon_ninja.core.models import (
     ScanState,
     ServiceInfo,
     Severity,
+    TechInfo,
 )
 from recon_ninja.core.runner import run_multiple, run_tool
 
@@ -635,6 +636,9 @@ class ReconEngine:
     async def phase5_vuln_correlate(self) -> None:
         """Run searchsploit and nuclei against all detected versions.
 
+        Also runs searchsploit against technologies detected by the
+        web_tech module (stored in ``state.detected_techs``).
+
         Skipped when ``config.skip_vuln_correlate`` is ``True``.
         """
         if self.config.skip_vuln_correlate:
@@ -643,9 +647,9 @@ class ReconEngine:
 
         commands: list[tuple[str, list[str], Path | None]] = []
 
-        # --- searchsploit ---
+        # --- searchsploit from nmap services ---
         if shutil.which("searchsploit"):
-            # Build a query from every product+version we found
+            # Build a query from every product+version we found via nmap
             for svc in self.state.services.values():
                 if svc.product and svc.version:
                     query = f"{svc.product} {svc.version}"
@@ -655,6 +659,24 @@ class ReconEngine:
                         ["searchsploit", "--json", query],
                         outfile,
                     ))
+
+            # Build queries from detected web technologies
+            for tech in self.state.detected_techs:
+                if tech.version and tech.name:
+                    # Skip if already covered by nmap service detection
+                    already_covered = any(
+                        svc.product.lower() == tech.name.lower() and svc.version == tech.version
+                        for svc in self.state.services.values()
+                    )
+                    if not already_covered:
+                        query = f"{tech.name} {tech.version}"
+                        safe_name = tech.name.lower().replace(" ", "_").replace("/", "_")
+                        outfile = self.output_dir / f"searchsploit_tech_{safe_name}_{tech.port}.txt"
+                        commands.append((
+                            f"searchsploit-tech-{safe_name}-{tech.port}",
+                            ["searchsploit", "--json", query],
+                            outfile,
+                        ))
 
         # --- nuclei ---
         if shutil.which("nuclei"):
@@ -684,15 +706,35 @@ class ReconEngine:
                 logger.warning("Vuln correlation task %s failed (rc=%d)", name, rc)
                 continue
             if "searchsploit" in name and stdout.strip():
-                self.state.add_finding(
-                    Finding(
-                        severity=Severity.MEDIUM,
-                        title=f"Searchsploit results for {name}",
-                        description="Potential exploits found — see output file",
-                        evidence=stdout[:2000],
-                        module="vuln_correlate",
+                # Try to parse JSON output for better findings
+                exploits_found = self._parse_searchsploit_json(stdout, name)
+                if exploits_found:
+                    severity = Severity.HIGH if len(exploits_found) > 3 else Severity.MEDIUM
+                    self.state.add_finding(
+                        Finding(
+                            severity=severity,
+                            title=f"Exploits found: {name} ({len(exploits_found)} results)",
+                            description=(
+                                f"searchsploit found {len(exploits_found)} potential exploits. "
+                                f"Top results: {', '.join(exploits_found[:5])}"
+                            ),
+                            evidence=stdout[:2000],
+                            module="vuln_correlate",
+                            suggested_commands=[
+                                f"searchsploit -x {name.split('-')[-1]}  # Examine exploit details",
+                            ],
+                        )
                     )
-                )
+                else:
+                    self.state.add_finding(
+                        Finding(
+                            severity=Severity.INFO,
+                            title=f"searchsploit ran: {name} (no exploits found)",
+                            description="No exploits found in searchsploit database",
+                            evidence=stdout[:500],
+                            module="vuln_correlate",
+                        )
+                    )
             if name == "nuclei" and stdout.strip():
                 self.state.add_finding(
                     Finding(
@@ -703,6 +745,46 @@ class ReconEngine:
                         module="vuln_correlate",
                     )
                 )
+
+    @staticmethod
+    def _parse_searchsploit_json(stdout: str, name: str) -> list[str]:
+        """Parse searchsploit JSON output for exploit titles.
+
+        Parameters
+        ----------
+        stdout:
+            The stdout from ``searchsploit --json <query>``.
+        name:
+            The task name for context.
+
+        Returns
+        -------
+        list[str]
+            List of exploit titles found.
+        """
+        exploits: list[str] = []
+        try:
+            import json
+            data = json.loads(stdout)
+            results = data.get("RESULTS", data.get("results", []))
+            if isinstance(results, list):
+                for entry in results[:10]:
+                    if isinstance(entry, dict):
+                        title = entry.get("Title", entry.get("title", ""))
+                        if title:
+                            exploits.append(title)
+                    elif isinstance(entry, str):
+                        exploits.append(entry)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            # Fallback: parse text output
+            for line in stdout.splitlines():
+                line = line.strip()
+                if line and not line.startswith("{") and not line.startswith("["):
+                    if "|" in line:
+                        parts = line.split("|")
+                        if len(parts) >= 2:
+                            exploits.append(parts[1].strip())
+        return exploits
 
     # ------------------------------------------------------------------
     # Phase 6 — Loot Extraction

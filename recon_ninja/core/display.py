@@ -28,7 +28,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity
+from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity, TechInfo
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +308,97 @@ def display_box_profile(profile: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tech stack display
+# ---------------------------------------------------------------------------
+
+
+def display_tech_stack(techs: list[TechInfo]) -> None:
+    """Display the detected technology stack in a Rich table.
+
+    Parameters
+    ----------
+    techs:
+        List of :class:`TechInfo` objects detected during scanning.
+    """
+    if not techs:
+        get_console().print("[dim]No technologies detected.[/]")
+        return
+
+    console = get_console()
+
+    # Group by port
+    ports_with_techs = sorted({t.port for t in techs})
+    for port in ports_with_techs:
+        port_techs = [t for t in techs if t.port == port]
+
+        table = Table(
+            title=f"🔬 Tech Stack — Port {port}",
+            show_header=True,
+            header_style="bold white",
+            border_style="cyan",
+            title_style="bold bright_cyan",
+        )
+        table.add_column("Technology", style="bold", min_width=16)
+        table.add_column("Version", width=12)
+        table.add_column("Category", width=12)
+        table.add_column("Confidence", width=10)
+        table.add_column("Source", width=10)
+        table.add_column("Vulnerable", width=10)
+
+        for tech in port_techs:
+            if tech.is_vulnerable:
+                vuln_str = f"[bold red]🔴 YES[/]"
+            else:
+                vuln_str = "[green]—[/]"
+
+            category_style = {
+                "language": "bold yellow",
+                "framework": "bold cyan",
+                "cms": "bold magenta",
+                "server": "bold green",
+                "waf": "bold red",
+                "library": "blue",
+                "os": "white",
+            }.get(tech.category, "white")
+
+            table.add_row(
+                tech.name,
+                tech.version or "—",
+                f"[{category_style}]{tech.category or '—'}[/]",
+                tech.confidence,
+                tech.source,
+                vuln_str,
+            )
+
+        console.print(table)
+        console.print()
+
+    # Vulnerable techs alert
+    vulnerable = [t for t in techs if t.is_vulnerable]
+    if vulnerable:
+        lines: list[str] = []
+        for vtech in vulnerable:
+            cve_list = ", ".join(vtech.cves)
+            lines.append(
+                f"  [bold red]🔴[/] [bold]{vtech.name} {vtech.version}[/] "
+                f"(port {vtech.port}) — [{cve_list}] via {vtech.source}"
+            )
+            lines.append(
+                f"     [dim]→ searchsploit {vtech.name} {vtech.version}[/]"
+            )
+
+        content = "\n".join(lines)
+        panel = Panel(
+            content,
+            title="⚠️ VULNERABLE TECHNOLOGIES",
+            border_style="bold red",
+            padding=(1, 2),
+        )
+        console.print(panel)
+        console.print()
+
+
+# ---------------------------------------------------------------------------
 # Findings display
 # ---------------------------------------------------------------------------
 
@@ -503,6 +594,10 @@ def display_scan_summary(state: ScanState) -> None:
 
     # --- Box profile ---
     display_box_profile(state.box_profile)
+
+    # --- Tech stack ---
+    if state.detected_techs:
+        display_tech_stack(state.detected_techs)
 
     # --- Findings ---
     display_findings_panel(state.all_findings)

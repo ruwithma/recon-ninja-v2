@@ -39,8 +39,8 @@ Task: Fix critical logging bug and provide update instructions for user's Kali i
 Work Log:
 - Investigated the ValueError: incomplete format key error reported by user
 - Found root cause: missing closing parenthesis in logging format string in main.py
-	- Bug: `%(levelname]` instead of `%(levelname)` in basicConfig format string
-	- This caused ALL logger.info() calls to fail with ValueError
+        - Bug: `%(levelname]` instead of `%(levelname)` in basicConfig format string
+        - This caused ALL logger.info() calls to fail with ValueError
 - Confirmed the fix was already committed (commit 59efdf4) and pushed to GitHub
 - Verified engine.py's _setup_file_logger format string is correct: `%(levelname)-7s`
 - Also confirmed ASCII banner update (ogre font) was in the same commit
@@ -55,10 +55,56 @@ Stage Summary:
 ## 2026-05-27 — Bugfix: preserve module_results on resume
 
 - Fixed: `ScanState.from_dict` dropped `module_results` when loading a saved
-	state causing module outputs to be lost on resume. Added
-	`ModuleResult.from_dict` and restored proper deserialization in
-	`recon_ninja/core/models.py`.
+        state causing module outputs to be lost on resume. Added
+        `ModuleResult.from_dict` and restored proper deserialization in
+        `recon_ninja/core/models.py`.
 - Verified: ran full test suite — all tests passed (310 passed).
 
 Notes: This improves resume fidelity so previously-run module results are
 retained in `scan.state` and `state.json` and visible in reports.
+
+---
+Task ID: 3
+Agent: main
+Task: Add automatic technology detection and vulnerability checking for web applications
+
+Work Log:
+- Read and analyzed all key files: engine.py (1206 lines), report.py (1108 lines), models.py (360 lines), web modules (4 files), display.py (694 lines)
+- Added TechInfo dataclass to models.py with: name, version, category, confidence, source, port, cves, is_vulnerable
+- Added detected_techs field to ScanState with: add_tech(), techs_by_port(), vulnerable_techs() methods
+- Added serialization/deserialization for detected_techs in ScanState.to_dict()/from_dict()
+- Created recon_ninja/modules/web/web_tech.py (~530 lines) with deep technology detection:
+  - HTTP header analysis: Server, X-Powered-By, X-AspNet-Version, X-Generator headers → 30+ rules
+  - Cookie-based detection: PHPSESSID, laravel_session, csrftoken, JSESSIONID, next-auth cookies → 16 rules
+  - HTML meta/JS analysis: generator tags, script src patterns, CSS patterns, HTML comments → 30+ rules
+  - Whatweb integration: enhanced parsing with proper categorization → 20+ category mappings
+  - Nmap service detection: product/version/extra_info/scripts parsing
+  - Built-in vulnerability database: 25+ entries mapping tech+version → CVEs (Heartbleed, Apache path traversal, vsftpd backdoor, etc.)
+- Updated web/__init__.py: added web_tech as Step 2 in pipeline (web_core → web_tech → web_dirfuzz → web_vuln → web_cms)
+- Enhanced engine.py phase5_vuln_correlate: now also runs searchsploit against detected web technologies from state.detected_techs
+- Added _parse_searchsploit_json() method for better exploit result parsing
+- Updated report.py: added "Detected Technologies" section to markdown, HTML, and JSON reports with per-port tech tables and vulnerable tech alerts
+- Updated display.py: added display_tech_stack() function with Rich tables grouped by port, color-coded categories, and vulnerable tech alert panel
+- Integrated display_tech_stack into display_scan_summary
+- Enhanced _generate_attack_paths in report.py: tech-specific attack paths (WordPress wpscan, Drupal drupalgeddon2, Next.js data endpoints, PHP feroxbuster extensions, Tomcat manager, Spring Boot actuator, ASP.NET ViewState)
+- All imports verified, lint passes, comprehensive integration tests pass
+
+Stage Summary:
+- New feature: Automatic technology stack detection for web applications
+  - Detects: servers (Apache, Nginx, IIS, Tomcat, etc.), languages (PHP, Java, Python, Ruby), frameworks (Express, Django, Flask, Laravel, Next.js, ASP.NET, Spring Boot), CMS (WordPress, Drupal, Joomla, Ghost), libraries (jQuery, Bootstrap, Tailwind), WAFs (Cloudflare, Wordfence)
+  - Detection sources: HTTP headers, cookies, HTML meta/JS, whatweb, nmap service info
+  - Confidence levels: certain, probable, possible
+- New feature: Built-in vulnerability database with 25+ known CVE mappings
+  - Apache 2.4.49 → CVE-2021-41773 (path traversal)
+  - Apache 2.4.50 → CVE-2021-42013
+  - OpenSSL 1.0.1 → CVE-2014-0160 (Heartbleed)
+  - vsftpd 2.3.4 → CVE-2011-2523 (backdoor)
+  - OpenSSH 8.2 → CVE-2020-15778
+  - IIS 6.0 → CVE-2017-7269
+  - Drupal 7.x/8.5/8.6 → CVE-2019-6340
+  - WordPress 4.x → CVE-2019-8943
+  - End-of-life version detection (PHP 5.x, 7.0, 7.1; nginx 0.x/1.0/1.1; Django 1.x/2.0/2.1; Rails 3.x/4.x/5.0)
+- New feature: Enhanced vulnerability correlation with tech-based searchsploit queries
+- New feature: Tech-specific attack paths in reports (WordPress, Drupal, Next.js, PHP, Tomcat, Spring Boot)
+- Files modified: models.py, engine.py, report.py, display.py, web/__init__.py
+- Files created: web_tech.py

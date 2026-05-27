@@ -90,6 +90,38 @@ class Finding:
 
 
 @dataclass
+class TechInfo:
+    """Detected technology on a web service."""
+
+    name: str
+    version: str = ""
+    category: str = ""       # "language", "framework", "cms", "server", "os", "library", "waf"
+    confidence: str = "certain"  # "certain", "probable", "possible"
+    source: str = ""          # "header", "cookie", "html", "whatweb", "nmap", "wappalyzer"
+    port: int = 0
+    cves: list[str] = field(default_factory=list)
+    is_vulnerable: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-friendly dictionary."""
+        return {
+            "name": self.name,
+            "version": self.version,
+            "category": self.category,
+            "confidence": self.confidence,
+            "source": self.source,
+            "port": self.port,
+            "cves": self.cves,
+            "is_vulnerable": self.is_vulnerable,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TechInfo:
+        """Deserialize from a dictionary."""
+        return cls(**data)
+
+
+@dataclass
 class ServiceInfo:
     """Information about a single service discovered on a port."""
 
@@ -212,6 +244,7 @@ class ScanState:
     completed_modules: list[str] = field(default_factory=list)
     all_findings: list[Finding] = field(default_factory=list)
     module_results: list[ModuleResult] = field(default_factory=list)
+    detected_techs: list[TechInfo] = field(default_factory=list)
     available_tools: dict[str, bool] = field(default_factory=dict)
     current_phase: int = 0
     end_time: datetime | None = None
@@ -230,6 +263,7 @@ class ScanState:
             "completed_modules": self.completed_modules,
             "all_findings": [f.to_dict() for f in self.all_findings],
             "module_results": [m.to_dict() for m in self.module_results],
+            "detected_techs": [t.to_dict() for t in self.detected_techs],
             "available_tools": self.available_tools,
             "current_phase": self.current_phase,
             "end_time": self.end_time.isoformat() if self.end_time else None,
@@ -251,6 +285,8 @@ class ScanState:
         }
         findings_raw = data.pop("all_findings", [])
         data["all_findings"] = [Finding.from_dict(f) for f in findings_raw]
+        techs_raw = data.pop("detected_techs", [])
+        data["detected_techs"] = [TechInfo.from_dict(t) for t in techs_raw]
         results_raw = data.pop("module_results", [])
         # Reconstruct ModuleResult objects if present in the payload.
         from_path_results = []
@@ -269,6 +305,20 @@ class ScanState:
         existing_titles = {(f.title, f.module) for f in self.all_findings}
         if (finding.title, finding.module) not in existing_titles:
             self.all_findings.append(finding)
+
+    def add_tech(self, tech: TechInfo) -> None:
+        """Add a detected technology, preventing duplicates by name+version+port."""
+        existing_keys = {(t.name, t.version, t.port) for t in self.detected_techs}
+        if (tech.name, tech.version, tech.port) not in existing_keys:
+            self.detected_techs.append(tech)
+
+    def techs_by_port(self, port: int) -> list[TechInfo]:
+        """Return detected technologies for a specific port."""
+        return [t for t in self.detected_techs if t.port == port]
+
+    def vulnerable_techs(self) -> list[TechInfo]:
+        """Return only technologies flagged as vulnerable."""
+        return [t for t in self.detected_techs if t.is_vulnerable]
 
     def findings_by_severity(self) -> dict[Severity, list[Finding]]:
         """Group findings by severity level."""

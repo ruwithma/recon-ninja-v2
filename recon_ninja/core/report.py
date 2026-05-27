@@ -33,7 +33,7 @@ from typing import Any
 import aiofiles
 from jinja2 import BaseLoader, Environment
 
-from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity
+from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity, TechInfo
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +292,45 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <h2>📦 Box Profile</h2>
 <p><span class="profile-badge">{{ box_profile }}</span></p>
 
+<!-- Detected Technologies -->
+<h2>🔬 Detected Technologies</h2>
+{% if detected_techs %}
+{% for port_data in tech_by_port %}
+<h3>🌐 Port {{ port_data.port }}</h3>
+<table>
+  <tr>
+    <th>Technology</th><th>Version</th><th>Category</th><th>Confidence</th><th>Source</th><th>Vulnerable</th><th>CVEs</th>
+  </tr>
+  {% for tech in port_data.techs %}
+  <tr>
+    <td>{{ tech.name }}</td>
+    <td>{{ tech.version or "—" }}</td>
+    <td>{{ tech.category or "—" }}</td>
+    <td>{{ tech.confidence }}</td>
+    <td>{{ tech.source }}</td>
+    <td>{% if tech.is_vulnerable %}<span class="sev-badge critical">YES</span>{% else %}—{% endif %}</td>
+    <td>{% if tech.cves %}<span class="finding-cve">{{ tech.cves | join(', ') }}</span>{% else %}—{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endfor %}
+{% if vulnerable_techs %}
+<div class="finding-card critical" style="margin-top:1rem">
+  <span class="finding-title">⚠️ Vulnerable Technologies Detected</span>
+  <div class="finding-desc" style="margin-top:0.5rem">
+  {% for vt in vulnerable_techs %}
+    <div style="margin-bottom:0.4rem">
+      <span class="sev-badge critical">{{ vt.cves | join(', ') }}</span>
+      <strong>{{ vt.name }} {{ vt.version }}</strong> (port {{ vt.port }}) via {{ vt.source }}
+    </div>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% else %}
+<p style="color:var(--text-secondary)">No technologies detected.</p>
+{% endif %}
+
 <!-- Key Findings -->
 <h2>🔥 Key Findings</h2>
 {% if findings %}
@@ -470,6 +509,43 @@ def _build_markdown(state: ScanState) -> str:
     # 4. Box Profile
     lines.append("## Box Profile\n")
     lines.append(f"**{state.box_profile}**\n")
+
+    # 4.5 Tech Stack
+    lines.append("## Detected Technologies\n")
+    if state.detected_techs:
+        # Group by port
+        ports_with_techs = sorted({t.port for t in state.detected_techs})
+        for port in ports_with_techs:
+            port_techs = [t for t in state.detected_techs if t.port == port]
+            lines.append(f"### Port {port}\n")
+            lines.append("| Technology | Version | Category | Confidence | Source | Vulnerable | CVEs |")
+            lines.append("|------------|---------|----------|------------|--------|------------|------|")
+            for tech in port_techs:
+                vuln_badge = "🔴 Yes" if tech.is_vulnerable else "—"
+                cves = ", ".join(tech.cves) if tech.cves else "—"
+                lines.append(
+                    f"| {tech.name} | {tech.version or '—'} | {tech.category or '—'} | "
+                    f"{tech.confidence} | {tech.source} | {vuln_badge} | {cves} |"
+                )
+            lines.append("")
+
+        # Vulnerable techs summary
+        vulnerable = state.vulnerable_techs()
+        if vulnerable:
+            lines.append("### ⚠️ Vulnerable Technologies\n")
+            for vtech in vulnerable:
+                cve_list = ", ".join(vtech.cves)
+                lines.append(
+                    f"- **{vtech.name} {vtech.version}** (port {vtech.port}) — "
+                    f"[{cve_list}] detected via {vtech.source}"
+                )
+                lines.append(
+                    f"  - `searchsploit {vtech.name} {vtech.version}`"
+                )
+            lines.append("")
+    else:
+        lines.append("*No technologies detected.*")
+    lines.append("")
 
     # 5. Key Findings
     lines.append("## Key Findings\n")
@@ -686,6 +762,16 @@ def _build_html(state: ScanState) -> str:
     # Loot
     loot = _extract_loot(state)
 
+    # Tech stack data
+    tech_by_port = []
+    ports_with_techs = sorted({t.port for t in state.detected_techs})
+    for port in ports_with_techs:
+        port_techs = [t for t in state.detected_techs if t.port == port]
+        tech_by_port.append({"port": port, "techs": [t.to_dict() for t in port_techs]})
+
+    vulnerable_techs = [t.to_dict() for t in state.vulnerable_techs()]
+    detected_techs = len(state.detected_techs) > 0
+
     # Attack commands
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
     context_cmds = _generate_attack_paths(state)
@@ -730,6 +816,9 @@ def _build_html(state: ScanState) -> str:
         findings=findings_data,
         service_details=service_details,
         loot=loot,
+        detected_techs=detected_techs,
+        tech_by_port=tech_by_port,
+        vulnerable_techs=vulnerable_techs,
         attack_commands=attack_commands,
         output_files=output_files,
     )
@@ -789,12 +878,16 @@ def _build_json(state: ScanState) -> str:
     # Loot
     loot = _extract_loot(state)
 
+    # Detected techs
+    techs_data = [t.to_dict() for t in state.detected_techs]
+
     report: dict[str, Any] = {
         "target": state.target,
         "scan_time": now,
         "box_profile": state.box_profile,
         "open_ports": open_ports_data,
         "services": services_data,
+        "detected_techs": techs_data,
         "findings": findings_data,
         "loot": loot,
     }
@@ -891,7 +984,7 @@ def _deduplicated_commands(findings: list[Finding], limit: int = 10) -> list[str
 def _generate_attack_paths(state: ScanState) -> list[str]:
     """Generate context-aware attack path suggestions based on the scan state.
 
-    This uses the detected services, box profile, and known ports to suggest
+    This uses the detected services, tech stack, and box profile to suggest
     concrete attack commands that a pentester/CTF player can copy-paste.
 
     Parameters
@@ -908,6 +1001,20 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
     target = state.target
     port_set = set(state.open_ports)
     services = state.services
+    techs = state.detected_techs
+
+    # Build tech lookup for attack path generation
+    tech_names = {t.name.lower() for t in techs}
+    tech_categories = {t.category for t in techs if t.category}
+
+    # --- Vulnerable techs (highest priority) ---
+    vulnerable = state.vulnerable_techs()
+    for vtech in vulnerable:
+        cves = ", ".join(vtech.cves)
+        commands.append(
+            f"# ⚠️ {vtech.name} {vtech.version} is VULNERABLE ({cves}) — "
+            f"searchsploit {vtech.name} {vtech.version}"
+        )
 
     # --- SSH ---
     if 22 in port_set or any("ssh" in s.service.lower() for s in services.values()):
@@ -993,6 +1100,54 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
             elif tool == "mongosh":
                 commands.append(f"mongosh mongodb://{target}")
 
+    # --- Tech-specific attack paths ---
+    _KNOWN_WEB_PORTS = {
+        80, 443, 8080, 8443,
+        3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
+        8888, 9000, 9090, 4443,
+    }
+    for wp in web_ports:
+        scheme = "https" if wp in (443, 8443, 4443) else "http"
+        url = f"{scheme}://{target}:{wp}"
+
+        port_techs = [t for t in techs if t.port == wp]
+
+        # WordPress
+        if any(t.name.lower() == "wordpress" for t in port_techs):
+            commands.append(f"wpscan --url {url} --enumerate u,p,t --passwords /usr/share/wordlists/rockyou.txt")
+
+        # Drupal
+        if any(t.name.lower() == "drupal" for t in port_techs):
+            commands.append(f"droopescan scan drupal -u {url}")
+            commands.append(f"python3 drupa7-CVE-2018-7600.py {url}  # Drupalgeddon2")
+
+        # Joomla
+        if any(t.name.lower() == "joomla" for t in port_techs):
+            commands.append(f"joomscan -u {url}")
+
+        # Next.js
+        if any(t.name.lower() == "next.js" for t in port_techs):
+            commands.append(f"curl {url}/_next/data/  # Next.js data endpoint")
+            commands.append(f"curl {url}/api/  # Next.js API routes")
+
+        # ASP.NET
+        if any("asp.net" in t.name.lower() for t in port_techs):
+            commands.append(f"dotnet {url}  # Check for ViewState deserialization")
+
+        # PHP
+        if any(t.name.lower() == "php" for t in port_techs):
+            commands.append(f"feroxbuster -u {url} -x php,txt,bak -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt")
+
+        # Tomcat
+        if any("tomcat" in t.name.lower() for t in port_techs):
+            commands.append(f"hydra -L users.txt -P pass.txt {url} http-get /manager/html")
+
+        # Spring Boot
+        if any("spring" in t.name.lower() for t in port_techs):
+            commands.append(f"curl {url}/actuator/env  # Spring Boot actuator")
+
+        break  # One set of tech-specific commands per web port group
+
     # --- Nuclei ---
     commands.append(f"nuclei -u {target} -t /usr/share/nuclei-templates/")
 
@@ -1004,7 +1159,7 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
             seen.add(cmd)
             unique.append(cmd)
 
-    return unique[:20]  # cap at 20 suggestions
+    return unique[:25]  # cap at 25 suggestions
 
 
 def _collect_output_files(state: ScanState) -> list[str]:
