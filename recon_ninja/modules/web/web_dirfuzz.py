@@ -242,6 +242,28 @@ def _severity_for_status(status: int, path: str) -> Severity:
     return Severity.INFO
 
 
+async def _head_status(url: str, path: str) -> int | None:
+    """Run a HEAD request and return the HTTP status code if available."""
+    full_url = f"{url}{path}"
+    try:
+        _rc, stdout, _stderr = await run_tool(
+            cmd=[
+                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                "--connect-timeout", "3",
+                "--max-time", "5",
+                full_url,
+            ],
+            timeout=10,  # generous — curl's own --max-time handles the real limit
+        )
+        status_str = stdout.strip()
+        if not status_str:
+            return None
+        return int(status_str)
+    except Exception as exc:
+        logger.debug("Error checking %s: %s", full_url, exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Async HEAD checker
 # ---------------------------------------------------------------------------
@@ -251,6 +273,7 @@ async def _check_path(
     url: str,
     path: str,
     severity: Severity,
+    baseline_status: int | None = None,
 ) -> Finding | None:
     """Send a HEAD request via curl and return a Finding if the path exists.
 
@@ -270,23 +293,14 @@ async def _check_path(
     """
     full_url = f"{url}{path}"
     try:
-        rc, stdout, stderr = await run_tool(
-            cmd=[
-                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
-                "--connect-timeout", "3",
-                "--max-time", "5",
-                full_url,
-            ],
-            timeout=10,  # generous — curl's own --max-time handles the real limit
-        )
-        # stdout contains just the status code with -w
-        status_str = stdout.strip()
-        if not status_str:
+        status = await _head_status(url, path)
+        if status is None:
             return None
-        status = int(status_str)
         if status == 0 or status >= 500:
             return None
         if status == 404:
+            return None
+        if baseline_status is not None and status == baseline_status:
             return None
 
         # Path exists — adjust severity
@@ -359,6 +373,7 @@ async def run_web_dirfuzz(
 
     threads = "10" if port not in (80, 443) else "20"
     depth = "1" if config.fast_mode else "2"
+    baseline_status: int | None = None
 
     # ------------------------------------------------------------------
     # 1. Common path probing (async HEAD requests) — run FIRST
@@ -366,6 +381,8 @@ async def run_web_dirfuzz(
     #    hammers the target (which could trigger WAF/rate-limiting).
     # ------------------------------------------------------------------
     if shutil.which("curl"):
+        baseline_status = await _head_status(url, "/rn_404_baseline_check")
+
         # Run HEAD checks concurrently (bounded)
         semaphore = asyncio.Semaphore(5)
 
@@ -373,7 +390,7 @@ async def run_web_dirfuzz(
             u: str, p: str, s: Severity,
         ) -> Finding | None:
             async with semaphore:
-                return await _check_path(u, p, s)
+                return await _check_path(u, p, s, baseline_status)
 
         head_tasks = [
             asyncio.create_task(_bounded_check(url, path, sev))
@@ -461,7 +478,8 @@ async def run_web_dirfuzz(
     # ------------------------------------------------------------------
     # 3. Vhost scan — if hostname is known
     # ------------------------------------------------------------------
-    if hostname:
+    vhost_hostname = hostname or state.primary_hostname
+    if vhost_hostname:
         vhost_wordlist = str(
             config.web_wordlist.parent.parent / "Discovery" / "DNS" / "subdomains-top1million-5000.txt"
         )
@@ -473,7 +491,7 @@ async def run_web_dirfuzz(
                     "gobuster", "vhost",
                     "-u", url,
                     "-w", vhost_wordlist,
-                    "--hostname", hostname,
+                    "--hostname", vhost_hostname,
                     "-t", "20",
                     "-q",
                 ],
@@ -501,7 +519,7 @@ async def run_web_dirfuzz(
                 cmd=[
                     "ffuf",
                     "-u", url,
-                    "-H", f"Host: FUZZ.{hostname}",
+                    "-H", f"Host: FUZZ.{vhost_hostname}",
                     "-w", vhost_wordlist,
                     "-mc", "200,301,302",
                     "-o", str(vhost_out),

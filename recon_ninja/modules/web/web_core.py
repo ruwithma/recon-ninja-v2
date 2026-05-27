@@ -18,6 +18,7 @@ Implements Step 1 of the web module specification:
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 import shutil
@@ -33,6 +34,8 @@ from recon_ninja.core.models import (
 )
 from recon_ninja.core.runner import run_tool
 from recon_ninja.core.utils import module_guard
+from recon_ninja.core.display import get_console
+from recon_ninja.utils.hosts import hostname_exists
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +180,15 @@ def _check_security_headers(headers: dict[str, str], url: str) -> list[Finding]:
     return findings
 
 
+def _is_ip_target(target: str) -> bool:
+    """Return True when the scan target is an IP address."""
+    try:
+        ipaddress.ip_address(target)
+    except ValueError:
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Main sub-module function
 # ---------------------------------------------------------------------------
@@ -249,10 +261,44 @@ async def run_web_core(
 
         # Extract hostnames from Location / Set-Cookie
         discovered_hosts = _extract_hostnames_from_headers(stdout)
+        target_is_ip = _is_ip_target(target)
         for host in discovered_hosts:
             if host not in state.hostnames:
                 state.hostnames.append(host)
                 logger.debug("[web_core] Discovered hostname from headers: %s", host)
+
+            if target_is_ip and not hostname_exists(host):
+                console = get_console()
+                console.print()
+                console.print(
+                    f"  [bold yellow][!] Hostname detected via redirect:[/] "
+                    f"[bold cyan]{host}[/]"
+                )
+                console.print(
+                    f"      Add to /etc/hosts:  "
+                    f"[bold]echo \"{target} {host}\" >> /etc/hosts[/]"
+                )
+                console.print(
+                    f"      Or re-run with:     "
+                    f"[bold]reconninja {target} --htb --add-hosts[/]"
+                )
+                console.print()
+                findings.append(
+                    Finding(
+                        severity=Severity.HIGH,
+                        title=f"Hostname redirect detected: {host}",
+                        description=(
+                            f"Server redirects to hostname {host} which is not in /etc/hosts. "
+                            f"Add it with: echo \"{target} {host}\" >> /etc/hosts"
+                        ),
+                        module="web_core",
+                        evidence=f"301 redirect to {host}",
+                        suggested_commands=[
+                            f'echo "{target} {host}" >> /etc/hosts',
+                            f"reconninja {target} --htb --add-hosts",
+                        ],
+                    )
+                )
 
         # Security headers
         sec_findings = _check_security_headers(headers, url)

@@ -16,6 +16,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from recon_ninja.core.models import (
     Finding,
@@ -32,6 +33,12 @@ from recon_ninja.modules.web.web_cms import run_web_cms
 from recon_ninja.core.utils import module_guard
 
 logger = logging.getLogger(__name__)
+
+
+def _rebuild_url_with_hostname(url: str, hostname: str, port: int) -> str:
+    """Replace the host component of a URL while preserving suffixes."""
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, f"{hostname}:{port}", parts.path, parts.query, parts.fragment))
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +92,15 @@ async def _scan_port(
     logger.info("[web:%d] Running web_core …", port)
     core_result = await run_web_core(target, port, url, state, config, port_dir)
     results.append(core_result)
+
+    # After web_core: check if a new hostname was discovered via redirect.
+    # If so, rebuild the URL so feroxbuster/nikto/etc use the hostname
+    # instead of the raw IP (which may 301-redirect everything).
+    refreshed_hostname = state.primary_hostname
+    if refreshed_hostname and refreshed_hostname != hostname:
+        logger.info("[web:%d] Hostname discovered: %s — rebuilding URL", port, refreshed_hostname)
+        hostname = refreshed_hostname
+        url = _rebuild_url_with_hostname(url, hostname, port)
 
     # Step 2 — Deep technology detection (needs headers from web_core)
     logger.info("[web:%d] Running web_tech …", port)
