@@ -36,7 +36,6 @@ yarn-error.log*
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
@@ -50,5 +49,52 @@ test
 prompt
 
 server.log
+
 # Skills directory
 /skills/
+
+# ===== Python / Recon Ninja =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.Python
+venv/
+.venv/
+env/
+
+# Recon Ninja scan results
+results/
+
+# Recon Ninja state files
+*.state
+
+# Recon Ninja config (contains API keys)
+.config/
+
+# Database
+*.db
+*.sqlite3
+prisma/*.db
+
+# Uploads / downloads
+upload/
+download/
+
+# Mini services
+mini-services/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
