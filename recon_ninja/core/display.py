@@ -338,7 +338,7 @@ def display_box_profile(profile: str) -> None:
     else:
         accent = "white"
 
-    console.print(f"  🎯 Box profile: [bold {accent}]{profile}[/]")
+    console.print(f"  [bold cyan][*][/] Box profile: [bold {accent}]{profile}[/]")
     console.print()
 
 

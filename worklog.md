@@ -186,3 +186,25 @@ Stage Summary:
 - Redesigned entire CLI output, installer, reports, and scripts to be completely emoji-free.
 - Styled status labels and warnings with professional cyberpunk status brackets ([+], [x], [!]).
 - Verified all unit tests and static types are green.
+
+---
+Task ID: 7
+Agent: main
+Task: Fix RustScan Execution Failure and Remove Remaining Emojis/Checkmarks
+
+Work Log:
+- Added `~/.cargo/bin` to `EXTRA_SEARCH_PATHS` in `checker.py` so that cargo-installed tools (like `rustscan`) can be successfully located even if they are not yet in the user's active shell PATH.
+- Updated `engine.py` to check both system `PATH` and `EXTRA_SEARCH_PATHS` when resolving the absolute path of the `rustscan` binary for execution, fixing a bug where cargo-installed rustscan was detected but failed to run due to PATH differences.
+- Implemented dynamic calculation of the system's maximum file descriptor limit (`ulimit` hard limit) in `engine.py` for `rustscan`.
+- Configured `--ulimit` and `-b` (batch size) arguments dynamically to prevent "Too many open files" crashes and permission denied ulimit warnings.
+- Appended `--scripts none` to the `rustscan` execution command in `engine.py` to prevent RustScan from automatically running its default internal Nmap scan, which fails on non-root scans.
+- Updated `_parse_rustscan_ports` to support parsing raw port numbers (printed in quiet mode) in addition to standard lines.
+- Replaced the remaining checkmark/cross symbols in `engine.py` step summary displays with clean retro bracket styling.
+- Verified all 311 unit tests and mypy type checks pass successfully.
+
+Stage Summary:
+- Fixed RustScan execution on Kali Linux, resolving ulimit permission errors, file descriptor limit crashes, and internal Nmap permission errors.
+- Improved tool discovery by adding Cargo bin to search paths and resolving the binary path at execution time.
+- Cleaned up the final remaining checkmark/cross symbols in engine status displays.
+- All unit tests and static types are green.
+

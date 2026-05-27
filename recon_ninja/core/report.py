@@ -354,7 +354,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
 <!-- Per-Service Details -->
 <h2>Per-Service Details</h2>
 {% for svc_detail in service_details %}
-<h3>{{ svc_detail.icon }} {{ svc_detail.label }} (port {{ svc_detail.port }})</h3>
+<h3>{% if svc_detail.icon %}{{ svc_detail.icon }} {% endif %}{{ svc_detail.label }} (port {{ svc_detail.port }})</h3>
 {% if svc_detail.product %}
 <p style="color:var(--text-secondary)">Product: {{ svc_detail.product }}</p>
 {% endif %}
@@ -641,9 +641,10 @@ def _write_service_details_md(lines: list[str], state: ScanState) -> None:
     }
 
     for group_name, svcs in sorted(service_groups.items()):
-        icon = icons.get(group_name, "❓")
+        icon = icons.get(group_name, "")
+        icon_str = f"{icon} " if icon else ""
         for svc in svcs:
-            lines.append(f"### {icon} {group_name} (port {svc.port})\n")
+            lines.append(f"### {icon_str}{group_name} (port {svc.port})\n")
             if svc.product:
                 lines.append(f"- **Product**: {svc.display_product}")
             if svc.hostname:
@@ -736,7 +737,7 @@ def _build_html(state: ScanState) -> str:
         detail: dict[str, Any] = {
             "port": svc.port,
             "label": f"{group} ({svc.service})",
-            "icon": icon_map.get(group, "❓"),
+            "icon": icon_map.get(group, ""),
             "product": svc.display_product if svc.product else None,
             "tech_stack": [],
             "dirs": [],

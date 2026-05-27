@@ -359,6 +359,7 @@ TOOL_REGISTRY: list[ToolInfo] = [
 
 EXTRA_SEARCH_PATHS: list[Path] = [
     Path.home() / "go" / "bin",
+    Path.home() / ".cargo" / "bin",
     Path.home() / ".local" / "bin",
     Path("/usr/local/bin"),
     Path("/usr/local/sbin"),

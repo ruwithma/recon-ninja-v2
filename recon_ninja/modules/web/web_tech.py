@@ -849,7 +849,7 @@ async def run_web_tech(
         for tech in port_techs:
             cat = tech.category or "other"
             label = f"{tech.name}" + (f" {tech.version}" if tech.version else "")
-            conf_icon = "✓" if tech.confidence == "certain" else "~"
+            conf_icon = "+" if tech.confidence == "certain" else "~"
             categories.setdefault(cat, []).append(f"{label} [{conf_icon}]")
 
         tech_summary_parts = []

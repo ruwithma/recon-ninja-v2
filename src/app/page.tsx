@@ -3,14 +3,14 @@
 import { useState } from 'react'
 
 const PHASES = [
-  { num: 0, name: 'Pre-flight', desc: 'Target validation, VPN check, tool inventory, SecLists detection', icon: '🔍' },
-  { num: 1, name: 'Port Discovery', desc: 'RustScan / Nmap fast SYN scan for open ports', icon: '📡' },
-  { num: 2, name: 'Deep Nmap', desc: 'Full service enumeration with -sC -sV -O + box classification', icon: '🔬' },
-  { num: 3, name: 'Service Modules', desc: '16 protocol-specific modules dispatched concurrently', icon: '⚙️' },
-  { num: 4, name: 'OSINT', desc: 'DNS enumeration, subdomain discovery, email harvesting', icon: '🌐' },
-  { num: 5, name: 'Vuln Correlate', desc: 'searchsploit + nuclei + NVD API enrichment', icon: '🎯' },
-  { num: 6, name: 'Loot Extract', desc: 'Regex scan for creds, flags, hashes, private keys', icon: '💰' },
-  { num: 7, name: 'Reports', desc: 'Markdown + HTML + JSON report generation', icon: '📊' },
+  { num: 0, name: 'Pre-flight', desc: 'Target validation, VPN check, tool inventory, SecLists detection' },
+  { num: 1, name: 'Port Discovery', desc: 'RustScan / Nmap fast SYN scan for open ports' },
+  { num: 2, name: 'Deep Nmap', desc: 'Full service enumeration with -sC -sV -O + box classification' },
+  { num: 3, name: 'Service Modules', desc: '16 protocol-specific modules dispatched concurrently' },
+  { num: 4, name: 'OSINT', desc: 'DNS enumeration, subdomain discovery, email harvesting' },
+  { num: 5, name: 'Vuln Correlate', desc: 'searchsploit + nuclei + NVD API enrichment' },
+  { num: 6, name: 'Loot Extract', desc: 'Regex scan for creds, flags, hashes, private keys' },
+  { num: 7, name: 'Reports', desc: 'Markdown + HTML + JSON report generation' },
 ]
 
 const MODULES = [
@@ -62,7 +62,7 @@ export default function Home() {
       <header className="border-b border-white/10" style={{ background: '#0d0d14' }}>
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="flex items-center gap-4">
-            <div className="text-4xl">🥷</div>
+            <div className="text-2xl font-mono px-3 py-1 rounded border" style={{ borderColor: '#00f0ff40', color: '#00f0ff', background: '#00f0ff10' }}>&gt;_</div>
             <div>
               <h1 className="text-3xl font-bold tracking-tight" style={{ color: '#00f0ff' }}>
                 RECONNINJA
@@ -122,7 +122,6 @@ export default function Home() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">{phase.icon}</span>
                     <h3 className="font-semibold" style={{ color: '#e2e8f0' }}>{phase.name}</h3>
                   </div>
                   <p className="text-sm mt-1" style={{ color: '#8892a4' }}>{phase.desc}</p>
@@ -264,7 +263,7 @@ export default function Home() {
             Built for CTF warriors. Sharpened for pentesters.
           </span>
           <span className="text-xs" style={{ color: '#6b7280' }}>
-            🥷 ReconNinja v2.0.0
+            ReconNinja v2.0.0
           </span>
         </div>
       </footer>

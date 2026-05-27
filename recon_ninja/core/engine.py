@@ -272,20 +272,44 @@ class ReconEngine:
         ports_file = self.output_dir / "ports.txt"
 
         # --- RustScan path ---
-        if shutil.which("rustscan"):
-            logger.info("Using RustScan for port discovery")
+        rustscan_path = shutil.which("rustscan")
+        if not rustscan_path:
+            # Check extra search paths
+            from recon_ninja.utils.checker import EXTRA_SEARCH_PATHS
+            import os
+            for p in EXTRA_SEARCH_PATHS:
+                cand = p / "rustscan"
+                if cand.is_file() and os.access(cand, os.X_OK):
+                    rustscan_path = str(cand)
+                    break
+
+        if rustscan_path:
+            logger.info("Using RustScan for port discovery (path: %s)", rustscan_path)
             if not self.quiet:
                 console = get_console()
                 console.print("  [dim]Using RustScan for fast port discovery...[/]")
             top_ports = "1000" if self.config.fast_mode else "10000"
+            
+            # Dynamically calculate ulimit and batch size to prevent OS permission/resource errors
+            import resource
+            try:
+                soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+            except Exception:
+                soft, hard = 1024, 1024
+
+            ulimit_val = min(5000, hard)
             cmd = [
-                "rustscan",
+                rustscan_path,
                 "--addresses", self.target,
                 "--top-ports", top_ports,
-                "--ulimit", "5000",
-                "--",
-                "-Pn",
+                "--ulimit", str(ulimit_val),
+                "--scripts", "none",
             ]
+            
+            if ulimit_val < 4500:
+                batch_size = max(100, ulimit_val - 100)
+                cmd.extend(["-b", str(batch_size)])
+
             rc, stdout, stderr = await run_tool(
                 cmd,
                 output_file=self.output_dir / "rustscan.txt",
@@ -293,7 +317,7 @@ class ReconEngine:
             )
 
             if rc == 0:
-                # RustScan prints "Open <ip>:<port>" lines
+                # RustScan prints "Open <ip>:<port>" lines or raw port numbers
                 open_ports = self._parse_rustscan_ports(stdout)
                 self.state.open_ports = sorted(set(open_ports))
                 logger.info("RustScan found %d open ports: %s", len(self.state.open_ports), self.state.open_ports)
@@ -317,7 +341,7 @@ class ReconEngine:
 
         if not self.quiet:
             console = get_console()
-            console.print(f"  [green]✓[/] Found [bold]{len(self.state.open_ports)}[/] open ports: [cyan]{', '.join(str(p) for p in self.state.open_ports)}[/]")
+            console.print(f"  [bold green][+][/] Found [bold]{len(self.state.open_ports)}[/] open ports: [cyan]{', '.join(str(p) for p in self.state.open_ports)}[/]")
 
     async def _nmap_fast_scan(self) -> None:
         """Fast SYN/TCP Connect scan using nmap as fallback."""
@@ -533,13 +557,13 @@ class ReconEngine:
                     continue
                 name = result.module_name
                 if result.status == "done":
-                    console.print(f"  [green]✓[/] {name} [dim]({result.duration_seconds:.1f}s)[/]")
+                    console.print(f"  [bold green][+][/] {name} [dim]({result.duration_seconds:.1f}s)[/]")
                 elif result.status == "error":
-                    console.print(f"  [red]✗[/] {name} [dim]— {result.error_message[:80]}[/]")
+                    console.print(f"  [bold red][x][/] {name} [dim]— {result.error_message[:80]}[/]")
                 elif result.status == "skipped":
-                    console.print(f"  [yellow]⊘[/] {name} [dim]— skipped[/]")
+                    console.print(f"  [yellow][-][/] {name} [dim]— skipped[/]")
                 elif result.status == "timeout":
-                    console.print(f"  [red]⏱[/] {name} [dim]— timed out[/]")
+                    console.print(f"  [red][!][/] {name} [dim]— timed out[/]")
 
         for result in module_results:
             if isinstance(result, Exception):
@@ -1266,16 +1290,21 @@ class ReconEngine:
     def _parse_rustscan_ports(output: str) -> list[int]:
         """Extract open port numbers from RustScan output.
 
-        RustScan prints lines like ``Open 10.10.10.1:22``.
+        Supports standard ``Open 10.10.10.1:22`` lines and quiet raw port formats.
         """
         import re
 
         ports: list[int] = []
         pattern = re.compile(r"Open\s+\S+:(\d+)")
         for line in output.splitlines():
+            line = line.strip()
+            if not line:
+                continue
             match = pattern.search(line)
             if match:
                 ports.append(int(match.group(1)))
+            elif line.isdigit():
+                ports.append(int(line))
         return ports
 
     @staticmethod
