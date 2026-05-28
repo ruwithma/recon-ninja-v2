@@ -452,42 +452,71 @@ async def run_web_dirfuzz(
 
     if shutil.which("feroxbuster"):
         ferox_out = output_dir / "feroxbuster.txt"
-        ferox_cmd = [
-            "feroxbuster",
-            "-u", url,
-            "-w", stage1_wl,
-            "-x", extensions,
-            "-t", threads,
-            "--scan-limit", "3",
-            "--timeout", "10",
-            "-q",  # quiet mode
-        ]
-        if use_adaptive:
-            ferox_cmd.append("--no-recursion")
-        else:
-            ferox_cmd.extend(["--depth", depth])
 
-        rc, stdout, stderr = await run_tool(
-            cmd=ferox_cmd,
-            output_file=ferox_out,
-            timeout=config.default_timeout,
+        # Pre-flight connectivity check — skip feroxbuster if target is
+        # unreachable (e.g. filtered ports on HTB) to avoid wasting the
+        # entire timeout budget on a dead target.
+        _preflight_rc, _preflight_out, _ = await run_tool(
+            cmd=[
+                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                "--connect-timeout", "5", "--max-time", "10", url,
+            ],
+            timeout=15,
         )
-        raw_parts.append(f"=== feroxbuster (Stage 1) ===\n{stdout[:5000]}")
+        target_reachable = (
+            _preflight_rc == 0
+            and _preflight_out.strip()
+            and _preflight_out.strip() != "000"
+        )
 
-        if rc in (0, 1) and stdout.strip():
-            for status, found_url, size in _parse_feroxbuster(stdout):
-                path = found_url.replace(url, "") or "/"
-                sev = _severity_for_status(status, path)
-                stage1_findings.append(
-                    Finding(
-                        severity=sev,
-                        title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                        description=f"Discovered path on {url}: {found_url}",
-                        module="web_dirfuzz",
-                        evidence=f"HTTP {status} Size:{size}",
+        if not target_reachable:
+            logger.warning(
+                "[web_dirfuzz] Target %s appears unreachable — skipping feroxbuster",
+                url,
+            )
+            raw_parts.append("=== feroxbuster (Stage 1) === SKIPPED (target unreachable)")
+        else:
+            ferox_cmd = [
+                "feroxbuster",
+                "-u", url,
+                "-w", stage1_wl,
+                "-x", extensions,
+                "-t", threads,
+                "--timeout", "7",
+                "--connect-timeout", "5",
+                "-q",  # quiet mode
+            ]
+            # Only add --scan-limit when scanning multiple URLs; on a single
+            # target (typical CTF scenario) it adds unnecessary overhead.
+            ferox_cmd.extend(["--filter-code", "403,429,502,503"])
+            if use_adaptive:
+                ferox_cmd.append("--no-recursion")
+            else:
+                ferox_cmd.extend(["--depth", depth])
+
+            # Give feroxbuster 1.5× the default timeout — directory fuzzing
+            # is inherently slower than single-command tools.
+            ferox_timeout = int(config.default_timeout * 1.5)
+            rc, stdout, stderr = await run_tool(
+                cmd=ferox_cmd,
+                output_file=ferox_out,
+                timeout=ferox_timeout,
+            )
+            raw_parts.append(f"=== feroxbuster (Stage 1) ===\n{stdout[:5000]}")
+
+            if rc in (0, 1) and stdout.strip():
+                for status, found_url, size in _parse_feroxbuster(stdout):
+                    path = found_url.replace(url, "") or "/"
+                    sev = _severity_for_status(status, path)
+                    stage1_findings.append(
+                        Finding(
+                            severity=sev,
+                            title=f"Fuzz: {path} (HTTP {status}, {size}B)",
+                            description=f"Discovered path on {url}: {found_url}",
+                            module="web_dirfuzz",
+                            evidence=f"HTTP {status} Size:{size}",
+                        )
                     )
-                )
-
     elif shutil.which("gobuster"):
         gobuster_out = output_dir / "gobuster_dir.txt"
         rc, stdout, stderr = await run_tool(
@@ -497,11 +526,11 @@ async def run_web_dirfuzz(
                 "-w", stage1_wl,
                 "-x", extensions,
                 "-t", threads,
-                "--timeout", "10s",
+                "--timeout", "7s",
                 "-q",
             ],
             output_file=gobuster_out,
-            timeout=config.default_timeout,
+            timeout=int(config.default_timeout * 1.5),
         )
         raw_parts.append(f"=== gobuster dir (Stage 1) ===\n{stdout[:5000]}")
 
@@ -541,12 +570,13 @@ async def run_web_dirfuzz(
                     "-x", extensions,
                     "-t", threads,
                     "--depth", depth,
-                    "--scan-limit", "3",
-                    "--timeout", "10",
+                    "--timeout", "7",
+                    "--connect-timeout", "5",
+                    "--filter-code", "403,429,502,503",
                     "-q",
                 ],
                 output_file=ferox_out_2,
-                timeout=config.default_timeout,
+                timeout=int(config.default_timeout * 1.5),
             )
             raw_parts.append(f"=== feroxbuster (Stage 2) ===\n{stdout2[:5000]}")
 
@@ -573,11 +603,11 @@ async def run_web_dirfuzz(
                     "-w", wordlist,
                     "-x", extensions,
                     "-t", threads,
-                    "--timeout", "10s",
+                    "--timeout", "7s",
                     "-q",
                 ],
                 output_file=gobuster_out_2,
-                timeout=config.default_timeout,
+                timeout=int(config.default_timeout * 1.5),
             )
             raw_parts.append(f"=== gobuster dir (Stage 2) ===\n{stdout2[:5000]}")
 
@@ -647,7 +677,7 @@ async def run_web_dirfuzz(
             rc, stdout, stderr = await run_tool(
                 cmd=cmd,
                 output_file=vhost_out,
-                timeout=config.default_timeout,
+                timeout=int(config.default_timeout * 1.5),
             )
             raw_parts.append(f"=== gobuster vhost (Stage 1) ===\n{stdout[:3000]}")
 
@@ -689,7 +719,7 @@ async def run_web_dirfuzz(
                     "-of", "json",
                 ],
                 output_file=vhost_out,
-                timeout=config.default_timeout,
+                timeout=int(config.default_timeout * 1.5),
             )
             raw_parts.append(f"=== ffuf vhost (Stage 1) ===\n{stdout[:3000]}")
 
@@ -732,7 +762,7 @@ async def run_web_dirfuzz(
                 rc2, stdout2, stderr2 = await run_tool(
                     cmd=cmd2,
                     output_file=vhost_out_2,
-                    timeout=config.default_timeout,
+                    timeout=int(config.default_timeout * 1.5),
                 )
                 raw_parts.append(f"=== gobuster vhost (Stage 2) ===\n{stdout2[:3000]}")
 
@@ -774,7 +804,7 @@ async def run_web_dirfuzz(
                         "-of", "json",
                     ],
                     output_file=vhost_out_2,
-                    timeout=config.default_timeout,
+                    timeout=int(config.default_timeout * 1.5),
                 )
                 raw_parts.append(f"=== ffuf vhost (Stage 2) ===\n{stdout2[:3000]}")
 

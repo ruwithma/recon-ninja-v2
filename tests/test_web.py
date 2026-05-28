@@ -205,8 +205,16 @@ class TestAdaptiveWebFuzz:
         def which_side_effect(cmd: str):
             return "/usr/bin/feroxbuster" if cmd == "feroxbuster" else None
 
-        # Simulate Stage 1 returning no output, meaning no findings
+        call_count = 0
+
+        # Pre-flight returns 200 (target reachable), Stage 1 returns no output
         async def run_tool_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Pre-flight curl check
+                return 0, "200", ""
+            # Stage 1 feroxbuster — no findings
             return 0, "", ""
 
         with (
@@ -215,9 +223,9 @@ class TestAdaptiveWebFuzz:
         ):
             result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
 
-        # It should only run once (Stage 1) and skip Stage 2
+        # It should run pre-flight + Stage 1 and skip Stage 2
         assert result.status == "done"
-        assert mock_run.call_count == 1
+        assert mock_run.call_count == 2
 
     @pytest.mark.asyncio
     async def test_adaptive_fuzz_runs_stage2_when_stage1_finds_directories(self, tmp_path: Path) -> None:
@@ -229,12 +237,23 @@ class TestAdaptiveWebFuzz:
         def which_side_effect(cmd: str):
             return "/usr/bin/feroxbuster" if cmd == "feroxbuster" else None
 
-        # Stage 1 stdout returns an active directory, Stage 2 returns empty
+        # Pre-flight returns 200, Stage 1 returns an active directory, Stage 2 returns empty
         stage1_out = "200      GET       48l http://10.129.7.81/dashboard"
         stage2_out = ""
 
+        call_count = 0
+
         async def run_tool_side_effect(*args, **kwargs):
-            return 0, stage1_out, ""
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Pre-flight curl check
+                return 0, "200", ""
+            if call_count == 2:
+                # Stage 1 feroxbuster — finds /dashboard
+                return 0, stage1_out, ""
+            # Stage 2 feroxbuster — empty
+            return 0, stage2_out, ""
 
         with (
             patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
@@ -244,8 +263,8 @@ class TestAdaptiveWebFuzz:
             result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
 
         assert result.status == "done"
-        # It should run Stage 1, detect /dashboard, and run Stage 2
-        assert mock_run.call_count == 2
+        # It should run pre-flight + Stage 1 + Stage 2
+        assert mock_run.call_count == 3
         assert any("dashboard" in f.title for f in result.findings)
 
 
@@ -327,8 +346,16 @@ class TestFeroxbusterCommandGen:
             return "/usr/bin/feroxbuster" if cmd == "feroxbuster" else None
 
         captured_cmds = []
+        call_count = 0
+
         async def run_tool_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
             captured_cmds.append(kwargs.get("cmd", args[0] if args else []))
+            if call_count == 1:
+                # Pre-flight curl check — target is reachable
+                return 0, "200", ""
+            # Stage 1 feroxbuster — no findings
             return 0, "", ""
 
         with (
@@ -338,9 +365,9 @@ class TestFeroxbusterCommandGen:
         ):
             await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
 
-        # Stage 1 cmd should be in captured_cmds
-        assert len(captured_cmds) >= 1
-        stage1_cmd = captured_cmds[0]
+        # First cmd is the pre-flight curl, second is feroxbuster Stage 1
+        assert len(captured_cmds) >= 2
+        stage1_cmd = captured_cmds[1]
         assert "feroxbuster" in stage1_cmd
         assert "--no-recursion" in stage1_cmd
         assert "--depth" not in stage1_cmd
