@@ -245,36 +245,38 @@ def _severity_for_status(status: int, path: str) -> Severity:
             return Severity.HIGH
         return Severity.LOW
     if status in (301, 302, 303, 307, 308):
-        return Severity.INFO
+        return Severity.LOW  # redirect — path exists, follow it
     if status == 403:
-        return Severity.INFO  # forbidden but path exists
+        return Severity.LOW  # forbidden but path EXISTS — valuable for CTF
     if status == 401:
-        return Severity.INFO
+        return Severity.MEDIUM  # auth required — very interesting for CTF
     return Severity.INFO
 
 
-async def _head_status(url: str, path: str) -> tuple[int | None, str]:
-    """Run a HEAD request and return the HTTP status code and redirect URL if available."""
+async def _head_status(url: str, path: str) -> tuple[int | None, str, int]:
+    """Run a HEAD request and return status code, redirect URL, and size."""
     full_url = f"{url}{path}"
     try:
         _rc, stdout, _stderr = await run_tool(
             cmd=[
-                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code} %{redirect_url}",
+                "curl", "-sI", "-o", "/dev/null",
+                "-w", "%{http_code} %{redirect_url} %{size_download}",
                 "--connect-timeout", "3",
                 "--max-time", "5",
                 full_url,
             ],
-            timeout=10,  # generous — curl's own --max-time handles the real limit
+            timeout=10,
         )
-        parts = stdout.strip().split(maxsplit=1)
+        parts = stdout.strip().split(maxsplit=2)
         if not parts:
-            return None, ""
+            return None, "", 0
         status_code = int(parts[0]) if parts[0].isdigit() else None
         redirect_url = parts[1] if len(parts) > 1 else ""
-        return status_code, redirect_url
+        size = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        return status_code, redirect_url, size
     except Exception as exc:
         logger.debug("Error checking %s: %s", full_url, exc)
-        return None, ""
+        return None, "", 0
 
 
 # ---------------------------------------------------------------------------
@@ -282,12 +284,13 @@ async def _head_status(url: str, path: str) -> tuple[int | None, str]:
 # ---------------------------------------------------------------------------
 
 
-async def _check_path(
+async def _check_path(  # noqa: C901
     url: str,
     path: str,
     severity: Severity,
     baseline_status: int | None = None,
     baseline_redirect: str = "",
+    baseline_size: int = 0,
 ) -> Finding | None:
     """Send a HEAD request via curl and return a Finding if the path exists.
 
@@ -299,6 +302,14 @@ async def _check_path(
         URL path to check (e.g. ``/.git/``).
     severity:
         Default severity if the path is found.
+    baseline_status:
+        Status code from a known-nonexistent path (baseline).
+    baseline_redirect:
+        Redirect URL from the baseline response.
+    baseline_size:
+        Response size from the baseline response.  Responses matching
+        both the baseline status AND size (within 10%%) are filtered
+        as likely identical default pages.
 
     Returns
     -------
@@ -307,19 +318,29 @@ async def _check_path(
     """
     full_url = f"{url}{path}"
     try:
-        status, redirect_url = await _head_status(url, path)
+        status, redirect_url, size = await _head_status(url, path)
         if status is None:
             return None
         if status == 0 or status >= 500:
             return None
         if status == 404:
             return None
+        # Baseline comparison: filter only if both status AND size match.
+        # A 200 response with a DIFFERENT size than the baseline is
+        # genuinely different content — don't filter it!
         if baseline_status is not None and status == baseline_status:
             if status in (301, 302, 307, 308):
                 if redirect_url == baseline_redirect:
                     return None
+            elif baseline_size > 0 and size > 0:
+                # Same status + similar size = same default page
+                size_diff = abs(size - baseline_size) / max(baseline_size, 1)
+                if size_diff < 0.1:
+                    return None
             else:
-                return None
+                # Same status but no size info — be conservative and
+                # keep the finding (better false positive than miss)
+                pass
 
         # Path exists — adjust severity
         actual_sev = _severity_for_status(status, path)
@@ -330,9 +351,9 @@ async def _check_path(
         return Finding(
             severity=actual_sev,
             title=f"Path found: {path} (HTTP {status})",
-            description=f"{full_url} returned HTTP {status}",
+            description=f"{full_url} returned HTTP {status} ({size}B)",
             module="web_dirfuzz",
-            evidence=f"HEAD {full_url} → {status}",
+            evidence=f"HEAD {full_url} → {status} ({size}B)",
         )
     except Exception as exc:
         logger.debug("Error checking %s: %s", full_url, exc)
@@ -340,7 +361,11 @@ async def _check_path(
 
 
 def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConfig) -> None:
-    """Register a newly discovered virtual host in state and /etc/hosts if enabled."""
+    """Register a newly discovered virtual host in state and /etc/hosts.
+
+    Automatically adds to /etc/hosts when running as root (typical CTF
+    usage) or when ``--htb`` / ``--add-hosts`` flags are set.
+    """
     vhost = vhost.split(":")[0].strip()  # Strip port if present
     if not vhost or vhost.replace(".", "").isdigit():
         return
@@ -350,6 +375,11 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
             config.module_toggles.get("_add_hosts", False)
             or config.module_toggles.get("_htb", False)
         )
+        # Auto-add when running as root — typical CTF usage via sudo
+        if not auto_add:
+            from recon_ninja.utils.network import is_root
+            auto_add = is_root()
+
         from recon_ninja.utils.hosts import (
             add_to_hosts,
             get_ip_for_hostname,
@@ -360,6 +390,12 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
                     "[web_dirfuzz] Automatically added/updated"
                     " %s -> %s in /etc/hosts",
                     target, vhost,
+                )
+                from recon_ninja.core.display import get_console
+                get_console().print(
+                    f"    [bold green][+][/] Auto-added "
+                    f"[bold cyan]{vhost}[/] -> {target} "
+                    f"in /etc/hosts"
                 )
 
 
@@ -423,8 +459,11 @@ async def run_web_dirfuzz(  # noqa: C901
     #    These are lightweight and must execute before feroxbuster
     #    hammers the target (which could trigger WAF/rate-limiting).
     # ------------------------------------------------------------------
+    baseline_size: int = 0
     if shutil.which("curl"):
-        baseline_status, baseline_redirect = await _head_status(url, "/rn_404_baseline_check")
+        baseline_status, baseline_redirect, baseline_size = (
+            await _head_status(url, "/rn_404_baseline_check")
+        )
 
         # Run HEAD checks concurrently (bounded)
         semaphore = asyncio.Semaphore(5)
@@ -433,7 +472,10 @@ async def run_web_dirfuzz(  # noqa: C901
             u: str, p: str, s: Severity,
         ) -> Finding | None:
             async with semaphore:
-                return await _check_path(u, p, s, baseline_status, baseline_redirect)
+                return await _check_path(
+                    u, p, s, baseline_status, baseline_redirect,
+                    baseline_size,
+                )
 
         head_tasks = [
             asyncio.create_task(_bounded_check(url, path, sev))
@@ -531,10 +573,12 @@ async def run_web_dirfuzz(  # noqa: C901
                 "-t", ferox_threads,
                 "--timeout", "4",
                 "--connect-timeout", "3",
+                "--dont-filter",  # don't auto-filter same-sized responses
                 "-q",  # quiet mode
             ]
+            # Filter only true junk codes — NOT 403 (interesting for CTF!)
             ferox_cmd.extend(
-                ["--filter-code", "403,429,502,503"]
+                ["--filter-code", "429,502,503"]
             )
             if use_adaptive:
                 ferox_cmd.append("--no-recursion")
@@ -635,7 +679,8 @@ async def run_web_dirfuzz(  # noqa: C901
                     "--depth", depth,
                     "--timeout", "7",
                     "--connect-timeout", "5",
-                    "--filter-code", "403,429,502,503",
+                    "--dont-filter",
+                    "--filter-code", "429,502,503",
                     "-q",
                 ],
                 output_file=ferox_out_2,

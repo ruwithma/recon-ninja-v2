@@ -451,15 +451,34 @@ class ReconEngine:
                 is_new = svc.hostname not in self.state.hostnames
                 self.state.add_hostname(svc.hostname)
                 if is_new:
-                    # Auto-add to hosts if enabled
-                    auto_add = self.config.module_toggles.get("_add_hosts", False) or self.config.module_toggles.get("_htb", False)
+                    # Auto-add to hosts if enabled OR running as root
+                    auto_add = (
+                        self.config.module_toggles.get("_add_hosts", False)
+                        or self.config.module_toggles.get("_htb", False)
+                    )
+                    if not auto_add:
+                        auto_add = is_root()
                     from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
-                    if auto_add and get_ip_for_hostname(svc.hostname) != self.target:
-                        if add_to_hosts(self.target, svc.hostname):
-                            logger.info("Automatically updated %s -> %s in /etc/hosts from nmap service info", self.target, svc.hostname)
+                    if auto_add and get_ip_for_hostname(
+                        svc.hostname
+                    ) != self.target:
+                        if add_to_hosts(
+                            self.target, svc.hostname,
+                        ):
+                            logger.info(
+                                "Auto-updated %s -> %s"
+                                " in /etc/hosts (nmap)",
+                                self.target, svc.hostname,
+                            )
                             if not self.quiet:
-                                from recon_ninja.core.display import get_console
-                                get_console().print(f"  [bold green][+][/] Automatically added [bold cyan]{svc.hostname}[/] to /etc/hosts")
+                                from recon_ninja.core.display import (
+                                    get_console,
+                                )
+                                get_console().print(
+                                    f"  [bold green][+][/] Auto-added"
+                                    f" [bold cyan]{svc.hostname}[/]"
+                                    f" to /etc/hosts"
+                                )
 
         # Classify the box
         self.state.box_profile = self._classify_box()
@@ -815,7 +834,11 @@ class ReconEngine:
             for wt in web_targets:
                 nuclei_cmd.extend(["-u", wt])
 
-            nuclei_cmd.extend(["-jsonl", "-o", str(self.output_dir / "nuclei.txt")])
+            nuclei_cmd.extend([
+                "-severity", "critical,high,medium",
+                "-exclude-tags", "fuzz,headless,dos",
+                "-jsonl", "-o", str(self.output_dir / "nuclei.txt"),
+            ])
             if self.config.nuclei_templates:
                 nuclei_cmd.extend(["-t", self.config.nuclei_templates])
             commands.append(("nuclei", nuclei_cmd, self.output_dir / "nuclei.txt"))

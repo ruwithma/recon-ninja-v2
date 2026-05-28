@@ -35,7 +35,7 @@ from recon_ninja.core.models import (
 from recon_ninja.core.runner import run_tool
 from recon_ninja.core.utils import module_guard
 from recon_ninja.core.display import get_console
-from recon_ninja.utils.hosts import hostname_exists, add_to_hosts, get_ip_for_hostname
+from recon_ninja.utils.hosts import add_to_hosts, get_ip_for_hostname
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,11 @@ def _parse_whatweb(raw: str) -> dict[str, str]:
 
 
 def _check_security_headers(headers: dict[str, str], url: str) -> list[Finding]:
-    """Flag missing security headers as INFO findings.
+    """Flag missing security headers as a SINGLE collapsed finding.
+
+    Instead of creating 5+ individual findings (which flood the output),
+    we create ONE finding listing all missing headers.  This keeps the
+    findings panel clean and focused on actionable items for CTF players.
 
     Parameters
     ----------
@@ -191,21 +195,26 @@ def _check_security_headers(headers: dict[str, str], url: str) -> list[Finding]:
     Returns
     -------
     list[Finding]
-        One finding per missing header.
+        One finding listing all missing security headers.
     """
-    findings: list[Finding] = []
+    missing: list[str] = []
     for header_key, header_display in REQUIRED_SECURITY_HEADERS.items():
         if header_key not in headers:
-            findings.append(
-                Finding(
-                    severity=Severity.INFO,
-                    title=f"Missing security header: {header_display}",
-                    description=f"{header_display} header is not set on {url}.",
-                    module="web_core",
-                    evidence=f"Header '{header_key}' absent from response",
-                )
-            )
-    return findings
+            missing.append(header_display)
+    if not missing:
+        return []
+    return [
+        Finding(
+            severity=Severity.INFO,
+            title=f"Missing {len(missing)} security headers",
+            description=(
+                f"Security headers not set on {url}: "
+                + ", ".join(missing)
+            ),
+            module="web_core",
+            evidence="Missing: " + ", ".join(missing),
+        )
+    ]
 
 
 def _is_ip_target(target: str) -> bool:
@@ -299,15 +308,31 @@ async def run_web_core(
                     logger.debug("[web_core] Discovered hostname from headers: %s", host)
 
                 if target_is_ip and (get_ip_for_hostname(host) != target):
-                    # Auto-add if enabled
-                    auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
+                    # Auto-add if enabled via flags OR running as root
+                    auto_add = (
+                        config.module_toggles.get("_add_hosts", False)
+                        or config.module_toggles.get("_htb", False)
+                    )
+                    if not auto_add:
+                        from recon_ninja.utils.network import (
+                            is_root as _is_root,
+                        )
+                        auto_add = _is_root()
                     added_successfully = False
                     if auto_add:
                         if add_to_hosts(target, host):
-                            logger.info("[web_core] Automatically added/updated %s -> %s in /etc/hosts", target, host)
+                            logger.info(
+                                "[web_core] Auto-added"
+                                " %s -> %s in /etc/hosts",
+                                target, host,
+                            )
                             if not config.module_toggles.get("_quiet", False):
                                 console = get_console()
-                                console.print(f"  [bold green][+][/] Automatically added/updated [bold cyan]{host}[/] in /etc/hosts")
+                                console.print(
+                                    f"  [bold green][+][/] Auto-added"
+                                    f" [bold cyan]{host}[/]"
+                                    f" -> {target} in /etc/hosts"
+                                )
                             added_successfully = True
 
                     if not added_successfully:

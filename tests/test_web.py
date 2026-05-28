@@ -106,8 +106,8 @@ class TestWebCoreRedirectWarning:
                 side_effect=run_tool_side_effect,
             ),
             patch(
-                "recon_ninja.modules.web.web_core.hostname_exists",
-                return_value=False,
+                "recon_ninja.modules.web.web_core.get_ip_for_hostname",
+                return_value=None,
             ),
             patch(
                 "recon_ninja.modules.web.web_core.get_console",

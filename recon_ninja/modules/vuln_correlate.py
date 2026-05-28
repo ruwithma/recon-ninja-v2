@@ -523,8 +523,8 @@ async def run_vuln_correlate_module(
                 "-u", url,
                 "-t", "cves/",
                 "-t", "exposures/",
-                "-t", "misconfiguration/",
                 "-severity", "critical,high,medium",
+                "-exclude-tags", "fuzz,headless,dos",
                 "-jsonl",
                 "-silent",
             ]

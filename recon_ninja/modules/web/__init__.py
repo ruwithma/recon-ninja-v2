@@ -4,10 +4,12 @@ This is the entry point imported by :mod:`recon_ninja.core.engine`.  It
 iterates over every HTTP/HTTPS port discovered during Phase 2, constructs
 the appropriate URL, and then runs the sub-modules:
 
-    web_core  →  web_tech  →  [web_dirfuzz | web_vuln | web_cms]  (concurrent)
+    web_core  →  web_tech  →  web_dirfuzz  →  [web_vuln | web_cms]  (concurrent)
 
-Each sub-module returns its own :class:`ModuleResult`.  All findings are
-aggregated into a single combined result with ``module_name="web"``.
+**CTF-first design**: directory fuzzing and vhost enumeration run BEFORE
+slow vulnerability scanners (nikto, nuclei).  This ensures the CTF player
+gets actionable paths and subdomains quickly, while the longer vuln scans
+continue in the background.
 """
 
 from __future__ import annotations
@@ -58,9 +60,9 @@ async def _scan_port(
     """Execute the full sub-module pipeline for a single HTTP port.
 
     Steps 1-2 (web_core, web_tech) run sequentially because web_tech
-    needs headers from web_core.  Steps 3-5 (web_dirfuzz, web_vuln,
-    web_cms) are independent and run **concurrently** via
-    ``asyncio.gather``.
+    needs headers from web_core.  Step 3 (web_dirfuzz) runs next to
+    produce actionable results FAST.  Steps 4-5 (web_vuln, web_cms)
+    run concurrently after dirs are found.
 
     Parameters
     ----------
@@ -89,7 +91,8 @@ async def _scan_port(
     port_dir = output_dir / f"port_{port}{host_suffix}"
     port_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1 — Core fingerprinting (must run first — fetches headers, hostnames)
+    # Step 1 — Core fingerprinting (must run first — fetches headers,
+    # hostnames, security headers, WAF detection)
     logger.info("[web:%d] Running web_core …", port)
     core_result = await run_web_core(target, port, url, state, config, port_dir)
     results.append(core_result)
@@ -99,7 +102,10 @@ async def _scan_port(
     # instead of the raw IP (which may 301-redirect everything).
     refreshed_hostname = state.primary_hostname
     if refreshed_hostname and refreshed_hostname != hostname:
-        logger.info("[web:%d] Hostname discovered: %s — rebuilding URL", port, refreshed_hostname)
+        logger.info(
+            "[web:%d] Hostname discovered: %s — rebuilding URL",
+            port, refreshed_hostname,
+        )
         hostname = refreshed_hostname
         url = _rebuild_url_with_hostname(url, hostname, port)
 
@@ -108,8 +114,50 @@ async def _scan_port(
     tech_result = await run_web_tech(target, port, url, state, config, port_dir)
     results.append(tech_result)
 
-    # Steps 3-5 — Independent sub-modules run CONCURRENTLY
-    logger.info("[web:%d] Running web_dirfuzz + web_vuln + web_cms concurrently …", port)
+    # Step 3 — Directory fuzzing + vhost enum (CTF-critical, run FIRST)
+    # This gives the CTF player actionable directories and subdomains
+    # quickly, before slow vuln scanners like nikto/nuclei run.
+    logger.info("[web:%d] Running web_dirfuzz (fast results first) …", port)
+    dirfuzz_result = await run_web_dirfuzz(
+        target, port, url, hostname, state, config, port_dir,
+    )
+    results.append(dirfuzz_result)
+
+    # Print quick results so the CTF player can start working immediately
+    dir_findings = [
+        f for f in dirfuzz_result.findings
+        if f.title.startswith("Fuzz:") or f.title.startswith("Path found:")
+    ]
+    vhost_findings = [
+        f for f in dirfuzz_result.findings
+        if f.title.startswith("Vhost found:")
+    ]
+    if dir_findings or vhost_findings:
+        from recon_ninja.core.display import get_console
+        console = get_console()
+        if dir_findings:
+            console.print(
+                f"    [bold green][+][/] Found "
+                f"[bold cyan]{len(dir_findings)}[/] directories/files "
+                f"on port {port}"
+            )
+            # Show top 5 most interesting dirs
+            sorted_dirs = sorted(dir_findings, key=lambda f: f.severity.rank)
+            for f in sorted_dirs[:8]:
+                console.print(f"      [dim]•[/] {f.title}")
+        if vhost_findings:
+            console.print(
+                f"    [bold green][+][/] Found "
+                f"[bold cyan]{len(vhost_findings)}[/] vhosts "
+                f"on port {port}"
+            )
+            for f in vhost_findings[:5]:
+                console.print(f"      [dim]•[/] {f.title}")
+
+    # Steps 4-5 — Slow vuln scanners run AFTER dirs (concurrent)
+    logger.info(
+        "[web:%d] Running web_vuln + web_cms concurrently …", port,
+    )
 
     async def _safe_run(name: str, coro):
         """Wrap a sub-module call so exceptions don't cancel siblings."""
@@ -124,9 +172,6 @@ async def _scan_port(
             )
 
     concurrent_results = await asyncio.gather(
-        _safe_run("web_dirfuzz", run_web_dirfuzz(
-            target, port, url, hostname, state, config, port_dir,
-        )),
         _safe_run("web_vuln", run_web_vuln(
             target, port, url, state, config, port_dir,
         )),
@@ -198,8 +243,12 @@ async def run_web_module(
     # --- Scan ports concurrently (bounded to 2 at a time) ---
     port_semaphore = asyncio.Semaphore(2)
 
-    async def _scan_port_bounded(port: int) -> tuple[int, list[ModuleResult]]:
-        """Scan a single port inside a semaphore, including any dynamically discovered virtual hosts."""
+    async def _scan_port_bounded(  # noqa: C901
+        port: int,
+    ) -> tuple[int, list[ModuleResult]]:
+        """Scan a single port inside a semaphore,
+        including any dynamically discovered virtual hosts.
+        """
         async with port_semaphore:
             svc = state.services.get(port)
             if svc is None:
@@ -251,7 +300,10 @@ async def run_web_module(
                             hosts_to_scan.append(host)
 
                 except Exception as exc:
-                    logger.exception("[web:%d] Sub-module pipeline failed for %s: %s", port, current_host, exc)
+                    logger.exception(
+                        "[web:%d] Pipeline failed for %s: %s",
+                        port, current_host, exc,
+                    )
                     error_finding = Finding(
                         severity=Severity.HIGH,
                         title=f"Web scan pipeline failed on port {port} for {current_host}",
@@ -283,7 +335,10 @@ async def run_web_module(
         for mod_result in port_results:
             all_findings.extend(mod_result.findings)
             if mod_result.raw_output:
-                all_raw.append(f"--- {mod_result.module_name} (port {port}) ---\n{mod_result.raw_output}")
+                all_raw.append(
+                    f"--- {mod_result.module_name} (port {port})"
+                    f" ---\n{mod_result.raw_output}"
+                )
             if mod_result.status == "error":
                 any_error = True
 

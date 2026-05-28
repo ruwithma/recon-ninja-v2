@@ -40,8 +40,23 @@ NIKTO_TIMEOUT = 180
 #: Timeout for nuclei scans (seconds).
 NUCLEI_TIMEOUT = 300
 
-#: Nuclei tags to target.
-NUCLEI_TAGS = "cve,exposure,misconfig"
+#: Nuclei tags to target — CTF-focused, skip info-level noise.
+NUCLEI_TAGS = "cve,exposure"
+
+#: Nuclei templates to EXCLUDE — these generate noise, not signal.
+NUCLEI_EXCLUDE_TAGS = "fuzz,headless,dos"
+
+#: Nikto line patterns to suppress (duplicated by web_core or noise).
+NIKTO_NOISE_PATTERNS = [
+    "suggested security header missing",
+    "x-content-type-options",
+    "strict-transport-security",
+    "content-security-policy",
+    "referrer-policy",
+    "permissions-policy",
+    "cross-origin",
+    "x-frame-options",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +116,10 @@ def _parse_nikto_findings(raw: str, url: str) -> list[Finding]:
             "target database:",
         )
         if any(content_lower.startswith(prefix) for prefix in metadata_prefixes):
+            continue
+
+        # Filter duplicate security-header warnings (already in web_core)
+        if any(noise in content_lower for noise in NIKTO_NOISE_PATTERNS):
             continue
 
         # Check for CVE reference
@@ -205,6 +224,11 @@ def _parse_nuclei_findings(raw: str, url: str) -> list[Finding]:
         }
         severity = severity_map.get(severity_str, Severity.INFO)
 
+        # Skip info-level nuclei findings — they're noise for CTF players
+        # (missing headers, SSH algo detection, etc.)
+        if severity == Severity.INFO:
+            continue
+
         # Extract CVE if present in template ID
         cve: str | None = None
         cve_match = re.search(r"CVE-\d{4}-\d{4,}", template_id)
@@ -299,7 +323,7 @@ async def run_web_vuln(
         raw_parts.append("=== nikto === SKIPPED (not found)")
 
     # ------------------------------------------------------------------
-    # 2. nuclei
+    # 2. nuclei — CTF-focused templates only
     # ------------------------------------------------------------------
     if shutil.which("nuclei"):
         nuclei_out = output_dir / "nuclei.txt"
@@ -308,6 +332,9 @@ async def run_web_vuln(
             "nuclei",
             "-u", url,
             "-o", str(nuclei_out),
+            "-severity", "critical,high,medium,low",
+            "-tags", NUCLEI_TAGS,
+            "-exclude-tags", NUCLEI_EXCLUDE_TAGS,
             "-silent",
         ]
 

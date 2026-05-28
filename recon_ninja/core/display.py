@@ -446,11 +446,13 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def display_findings_panel(findings: list[Finding]) -> None:
+def display_findings_panel(findings: list[Finding]) -> None:  # noqa: C901
     """Display findings sorted by severity in a Rich panel.
 
     Groups findings by severity level with count badges, and truncates
-    long descriptions for a cleaner display.
+    long descriptions for a cleaner display.  INFO findings are
+    collapsed into a summary count to keep the panel focused on
+    actionable items for CTF players.
 
     Parameters
     ----------
@@ -462,7 +464,12 @@ def display_findings_panel(findings: list[Finding]) -> None:
         return
 
     console = get_console()
-    sorted_findings = sorted(findings, key=lambda f: f.severity.rank)
+
+    # Separate INFO from actionable findings
+    actionable = [f for f in findings if f.severity != Severity.INFO]
+    info_findings = [f for f in findings if f.severity == Severity.INFO]
+
+    sorted_findings = sorted(actionable, key=lambda f: f.severity.rank)
 
     # Group by severity for structured display
     lines: list[str] = []
@@ -490,20 +497,45 @@ def display_findings_panel(findings: list[Finding]) -> None:
             # Normalize title and description for redundancy comparison
             title_norm = re.sub(r'https?://[^\s/]+', '', finding.title.lower())
             title_norm = re.sub(r'[^a-z0-9]', '', title_norm)
-            
+
             desc_norm = re.sub(r'https?://[^\s/]+', '', desc.lower())
             desc_norm = re.sub(r'[^a-z0-9]', '', desc_norm)
-            
-            for word in ["nikto", "nuclei", "fuzz", "pathfound", "techdetected", "wafdetected", "findingon"]:
+
+            for word in ["nikto", "nuclei", "fuzz", "pathfound",
+                         "techdetected", "wafdetected", "findingon"]:
                 title_norm = title_norm.replace(word, "")
                 desc_norm = desc_norm.replace(word, "")
-                
+
             is_redundant = False
-            if not title_norm or not desc_norm or title_norm in desc_norm or desc_norm in title_norm:
+            if not title_norm or not desc_norm:
                 is_redundant = True
-                
+            elif title_norm in desc_norm or desc_norm in title_norm:
+                is_redundant = True
+
             if not is_redundant:
                 lines.append(f"    [dim]{desc}[/]")
+
+    # Collapse INFO findings into a single summary line
+    if info_findings:
+        info_count = len(info_findings)
+        # Group by category for a cleaner summary
+        categories: dict[str, int] = {}
+        for f in info_findings:
+            # Extract category from title
+            cat = f.title.split(":")[0] if ":" in f.title else "Other"
+            categories[cat] = categories.get(cat, 0) + 1
+
+        lines.append(
+            f"  [dim][INFO] INFO ({info_count} findings)[/]"
+        )
+        lines.append(f"  [{'─' * 40}]")
+        cat_parts = [f"{cat} ({cnt})" for cat, cnt in sorted(categories.items())]
+        lines.append(
+            f"    [dim]{', '.join(cat_parts[:8])}[/]"
+        )
+        lines.append(
+            "    [dim]See full report for details[/]"
+        )
 
     content = "\n".join(lines)
     panel = Panel(
