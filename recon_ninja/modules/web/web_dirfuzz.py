@@ -452,18 +452,23 @@ async def run_web_dirfuzz(
 
     if shutil.which("feroxbuster"):
         ferox_out = output_dir / "feroxbuster.txt"
+        ferox_cmd = [
+            "feroxbuster",
+            "-u", url,
+            "-w", stage1_wl,
+            "-x", extensions,
+            "-t", threads,
+            "--scan-limit", "3",
+            "--timeout", "10",
+            "-q",  # quiet mode
+        ]
+        if use_adaptive:
+            ferox_cmd.append("--no-recursion")
+        else:
+            ferox_cmd.extend(["--depth", depth])
+
         rc, stdout, stderr = await run_tool(
-            cmd=[
-                "feroxbuster",
-                "-u", url,
-                "-w", stage1_wl,
-                "-x", extensions,
-                "-t", threads,
-                "--depth", "1" if use_adaptive else depth,
-                "--scan-limit", "3",
-                "--timeout", "10",
-                "-q",  # quiet mode
-            ],
+            cmd=ferox_cmd,
             output_file=ferox_out,
             timeout=config.default_timeout,
         )
