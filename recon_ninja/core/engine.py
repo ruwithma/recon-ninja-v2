@@ -451,10 +451,10 @@ class ReconEngine:
                 self.state.hostnames.append(svc.hostname)
                 # Auto-add to hosts if enabled
                 auto_add = self.config.module_toggles.get("_add_hosts", False) or self.config.module_toggles.get("_htb", False)
-                from recon_ninja.utils.hosts import hostname_exists, add_to_hosts
-                if auto_add and not hostname_exists(svc.hostname):
+                from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
+                if auto_add and get_ip_for_hostname(svc.hostname) != self.target:
                     if add_to_hosts(self.target, svc.hostname):
-                        logger.info("Automatically added %s -> %s to /etc/hosts from nmap service info", self.target, svc.hostname)
+                        logger.info("Automatically updated %s -> %s in /etc/hosts from nmap service info", self.target, svc.hostname)
                         if not self.quiet:
                             from recon_ninja.core.display import get_console
                             get_console().print(f"  [bold green][+][/] Automatically added [bold cyan]{svc.hostname}[/] to /etc/hosts")

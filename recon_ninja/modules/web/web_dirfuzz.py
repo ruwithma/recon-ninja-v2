@@ -337,10 +337,10 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
     if vhost not in state.hostnames:
         state.hostnames.append(vhost)
         auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
-        from recon_ninja.utils.hosts import hostname_exists, add_to_hosts
-        if auto_add and not hostname_exists(vhost):
+        from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
+        if auto_add and get_ip_for_hostname(vhost) != target:
             if add_to_hosts(target, vhost):
-                logger.info("[web_dirfuzz] Automatically added %s -> %s to /etc/hosts", target, vhost)
+                logger.info("[web_dirfuzz] Automatically added/updated %s -> %s in /etc/hosts", target, vhost)
 
 
 # ---------------------------------------------------------------------------
