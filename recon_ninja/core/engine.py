@@ -447,17 +447,19 @@ class ReconEngine:
 
         # Detect hostnames from service info
         for svc in self.state.services.values():
-            if svc.hostname and svc.hostname not in self.state.hostnames:
-                self.state.hostnames.append(svc.hostname)
-                # Auto-add to hosts if enabled
-                auto_add = self.config.module_toggles.get("_add_hosts", False) or self.config.module_toggles.get("_htb", False)
-                from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
-                if auto_add and get_ip_for_hostname(svc.hostname) != self.target:
-                    if add_to_hosts(self.target, svc.hostname):
-                        logger.info("Automatically updated %s -> %s in /etc/hosts from nmap service info", self.target, svc.hostname)
-                        if not self.quiet:
-                            from recon_ninja.core.display import get_console
-                            get_console().print(f"  [bold green][+][/] Automatically added [bold cyan]{svc.hostname}[/] to /etc/hosts")
+            if svc.hostname:
+                is_new = svc.hostname not in self.state.hostnames
+                self.state.add_hostname(svc.hostname)
+                if is_new:
+                    # Auto-add to hosts if enabled
+                    auto_add = self.config.module_toggles.get("_add_hosts", False) or self.config.module_toggles.get("_htb", False)
+                    from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
+                    if auto_add and get_ip_for_hostname(svc.hostname) != self.target:
+                        if add_to_hosts(self.target, svc.hostname):
+                            logger.info("Automatically updated %s -> %s in /etc/hosts from nmap service info", self.target, svc.hostname)
+                            if not self.quiet:
+                                from recon_ninja.core.display import get_console
+                                get_console().print(f"  [bold green][+][/] Automatically added [bold cyan]{svc.hostname}[/] to /etc/hosts")
 
         # Classify the box
         self.state.box_profile = self._classify_box()
@@ -720,8 +722,7 @@ class ReconEngine:
             # Add discovered subdomains to state and findings
             if subdomains:
                 for sub in subdomains:
-                    if sub not in self.state.hostnames:
-                        self.state.hostnames.append(sub)
+                    self.state.add_hostname(sub)
 
                 sublist = sorted(list(subdomains))
                 self.state.add_finding(

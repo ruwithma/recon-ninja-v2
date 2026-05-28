@@ -344,3 +344,83 @@ class TestFeroxbusterCommandGen:
         assert "feroxbuster" in stage1_cmd
         assert "--no-recursion" in stage1_cmd
         assert "--depth" not in stage1_cmd
+
+
+class TestWhatwebFixes:
+    def test_parse_whatweb_excludes_status_and_metadata(self) -> None:
+        from recon_ninja.modules.web.web_core import _parse_whatweb
+        raw_output = (
+            "http://10.129.7.182 [200 OK] Apache[2.4.52], PHP[7.4], WordPress[5.9], "
+            "IP[10.129.7.182], Title[Dashboard], Country[RESERVED][ZZ]\n"
+            "http://10.129.7.182/login [302 Found] RedirectLocation[http://10.129.7.182/index.php]"
+        )
+        tech_map = _parse_whatweb(raw_output)
+        
+        # Spurious 200 OK status matches should not exist
+        assert "200 OK" not in tech_map
+        assert "302 Found" not in tech_map
+        # Metadata fields should be ignored
+        assert "IP" not in tech_map
+        assert "Title" not in tech_map
+        assert "Country" not in tech_map
+        assert "RedirectLocation" not in tech_map
+        
+        # Valid technologies should be kept
+        assert tech_map["Apache"] == "2.4.52"
+        assert tech_map["PHP"] == "7.4"
+        assert tech_map["WordPress"] == "5.9"
+
+
+class TestCurlHeaderHttp2:
+    def test_parse_curl_headers_http2_and_standard(self) -> None:
+        from recon_ninja.modules.web.web_core import _parse_curl_headers
+        raw_http2 = (
+            "HTTP/2 200\r\n"
+            ":status: 200\r\n"
+            ":status 200\r\n"
+            "server: nginx/1.18.0\r\n"
+            "content-type: text/html\r\n"
+        )
+        headers = _parse_curl_headers(raw_http2)
+        assert headers.get("server") == "nginx/1.18.0"
+        assert headers.get("content-type") == "text/html"
+        assert headers.get("status") == "200"
+
+        raw_http1 = (
+            "HTTP/1.1 200 OK\r\n"
+            "Server: Apache\r\n"
+            "Content-Type: application/json\r\n"
+        )
+        headers_http1 = _parse_curl_headers(raw_http1)
+        assert headers_http1.get("server") == "Apache"
+        assert headers_http1.get("content-type") == "application/json"
+
+
+class TestExtractHostnamesIPGuard:
+    def test_extract_hostnames_ignores_bare_ips(self) -> None:
+        from recon_ninja.modules.web.web_core import _extract_hostnames_from_headers
+        raw_headers = (
+            "HTTP/1.1 301 Moved Permanently\r\n"
+            "Location: http://10.10.10.1/index.php\r\n"
+            "Set-Cookie: session=xyz; Domain=smarthire.htb\r\n"
+            "\r\n"
+            "HTTP/1.1 200 OK\r\n"
+            "Location: https://sub.smarthire.htb:8443/home\r\n"
+            "Set-Cookie: session=xyz; Domain=127.0.0.1\r\n"
+        )
+        hosts = _extract_hostnames_from_headers(raw_headers)
+        assert "smarthire.htb" in hosts
+        assert "sub.smarthire.htb" in hosts
+        assert "10.10.10.1" not in hosts
+        assert "127.0.0.1" not in hosts
+
+
+class TestScanStateAddHostname:
+    def test_add_hostname_duplicate_check(self, tmp_path: Path) -> None:
+        state = _make_web_state(tmp_path)
+        state.add_hostname("smarthire.htb")
+        state.add_hostname("smarthire.htb")
+        state.add_hostname("")
+        state.add_hostname("another.htb")
+        
+        assert state.hostnames == ["smarthire.htb", "another.htb"]

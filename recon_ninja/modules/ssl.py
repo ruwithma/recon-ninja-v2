@@ -459,7 +459,7 @@ async def run_ssl_module(
         # Clean up wildcards for state purposes
         clean_hostname = hostname.lstrip("*.")
         if clean_hostname and clean_hostname not in state.hostnames:
-            state.hostnames.append(clean_hostname)
+            state.add_hostname(clean_hostname)
             logger.info("SSL cert discovery: added hostname %s", clean_hostname)
 
     # ------------------------------------------------------------------

@@ -81,10 +81,24 @@ def _parse_curl_headers(raw: str) -> dict[str, str]:
     last_block = blocks[-1] if blocks else ""
 
     for line in last_block.splitlines():
-        if ":" not in line:
+        line = line.strip()
+        if not line:
             continue
-        name, _, value = line.partition(":")
-        headers[name.strip().lower()] = value.strip()
+        if line.startswith(":"):
+            # Pseudo-header (HTTP/2)
+            line_clean = line[1:]
+            if ":" in line_clean:
+                name, _, value = line_clean.partition(":")
+            elif " " in line_clean:
+                name, _, value = line_clean.partition(" ")
+            else:
+                continue
+            headers[name.strip().lower()] = value.strip()
+        else:
+            if ":" not in line:
+                continue
+            name, _, value = line.partition(":")
+            headers[name.strip().lower()] = value.strip()
 
     return headers
 
@@ -107,13 +121,13 @@ def _extract_hostnames_from_headers(raw: str) -> list[str]:
     # Location headers
     for match in re.finditer(r"^Location:\s*https?://([^/:]+)", raw, re.MULTILINE | re.IGNORECASE):
         host = match.group(1)
-        if host not in hostnames:
+        if not _is_ip_target(host) and host not in hostnames:
             hostnames.append(host)
 
     # Set-Cookie domain=
     for match in re.finditer(r"domain=\.?([^\s;]+)", raw, re.IGNORECASE):
         host = match.group(1)
-        if host not in hostnames:
+        if not _is_ip_target(host) and host not in hostnames:
             hostnames.append(host)
 
     return hostnames
@@ -143,10 +157,24 @@ def _parse_whatweb(raw: str) -> dict[str, str]:
     raw = ansi_escape.sub('', raw)
 
     tech: dict[str, str] = {}
-    for match in re.finditer(r"(\w[\w\s\-]*?)\[([^\]]+)\]", raw):
-        name = match.group(1).strip()
-        detail = match.group(2).strip()
-        tech[name] = detail
+    _WHATWEB_METADATA_FIELDS = {
+        "ip", "title", "country", "httpserver", "redirectlocation",
+        "cookies", "email", "uncommonheaders", "html5", "x-frame-options",
+        "x-xss-protection", "strict-transport-security", "x-powered-by",
+        "meta-author", "script", "frame", "passwordfield",
+    }
+
+    for line in raw.splitlines():
+        # Strip URL and status code prefix
+        line_clean = re.sub(r"^(?:https?://)?\S+\s+\[\d{3}(?:\s+[^\]]*)?\]", "", line, flags=re.IGNORECASE)
+        for match in re.finditer(r"(\w[\w\s\-]*?)\[([^\]]+)\]", line_clean):
+            name = match.group(1).strip()
+            detail = match.group(2).strip()
+            if name.isdigit() or name.startswith("http"):
+                continue
+            if name.lower() in _WHATWEB_METADATA_FIELDS:
+                continue
+            tech[name] = detail
     return tech
 
 
@@ -243,76 +271,81 @@ async def run_web_core(
             timeout=config.default_timeout,
         )
         raw_parts.append(f"=== curl -sI -L ===\n{stdout}")
+        if rc != 0 and stderr.strip():
+            raw_parts.append(f"=== curl -sI -L (error) ===\n{stderr}")
 
-        headers = _parse_curl_headers(stdout)
+        if rc == 0:
+            headers = _parse_curl_headers(stdout)
 
-        # Server banner
-        server = headers.get("server", "")
-        if server:
-            findings.append(
-                Finding(
-                    severity=Severity.INFO,
-                    title=f"Server banner: {server}",
-                    description=f"HTTP Server header on {url}: {server}",
-                    module="web_core",
-                    evidence=f"Server: {server}",
-                )
-            )
-
-        # Extract hostnames from Location / Set-Cookie
-        discovered_hosts = _extract_hostnames_from_headers(stdout)
-        target_is_ip = _is_ip_target(target)
-        for host in discovered_hosts:
-            if host not in state.hostnames:
-                state.hostnames.append(host)
-                logger.debug("[web_core] Discovered hostname from headers: %s", host)
-
-            if target_is_ip and (get_ip_for_hostname(host) != target):
-                # Auto-add if enabled
-                auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
-                if auto_add:
-                    if add_to_hosts(target, host):
-                        logger.info("[web_core] Automatically added/updated %s -> %s in /etc/hosts", target, host)
-                        if not config.module_toggles.get("_quiet", False):
-                            console = get_console()
-                            console.print(f"  [bold green][+][/] Automatically added/updated [bold cyan]{host}[/] in /etc/hosts")
-                        continue
-
-                console = get_console()
-                console.print()
-                console.print(
-                    f"  [bold yellow][!] Hostname detected via redirect:[/] "
-                    f"[bold cyan]{host}[/]"
-                )
-                console.print(
-                    f"      Add to /etc/hosts:  "
-                    f"[bold]echo \"{target} {host}\" >> /etc/hosts[/]"
-                )
-                console.print(
-                    f"      Or re-run with:     "
-                    f"[bold]reconninja {target} --htb --add-hosts[/]"
-                )
-                console.print()
+            # Server banner
+            server = headers.get("server", "")
+            if server:
                 findings.append(
                     Finding(
-                        severity=Severity.HIGH,
-                        title=f"Hostname redirect detected: {host}",
-                        description=(
-                            f"Server redirects to hostname {host} which is not in /etc/hosts. "
-                            f"Add it with: echo \"{target} {host}\" >> /etc/hosts"
-                        ),
+                        severity=Severity.INFO,
+                        title=f"Server banner: {server}",
+                        description=f"HTTP Server header on {url}: {server}",
                         module="web_core",
-                        evidence=f"301 redirect to {host}",
-                        suggested_commands=[
-                            f'echo "{target} {host}" >> /etc/hosts',
-                            f"reconninja {target} --htb --add-hosts",
-                        ],
+                        evidence=f"Server: {server}",
                     )
                 )
 
-        # Security headers
-        sec_findings = _check_security_headers(headers, url)
-        findings.extend(sec_findings)
+            # Extract hostnames from Location / Set-Cookie
+            discovered_hosts = _extract_hostnames_from_headers(stdout)
+            target_is_ip = _is_ip_target(target)
+            for host in discovered_hosts:
+                if host not in state.hostnames:
+                    state.add_hostname(host)
+                    logger.debug("[web_core] Discovered hostname from headers: %s", host)
+
+                if target_is_ip and (get_ip_for_hostname(host) != target):
+                    # Auto-add if enabled
+                    auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
+                    added_successfully = False
+                    if auto_add:
+                        if add_to_hosts(target, host):
+                            logger.info("[web_core] Automatically added/updated %s -> %s in /etc/hosts", target, host)
+                            if not config.module_toggles.get("_quiet", False):
+                                console = get_console()
+                                console.print(f"  [bold green][+][/] Automatically added/updated [bold cyan]{host}[/] in /etc/hosts")
+                            added_successfully = True
+
+                    if not added_successfully:
+                        console = get_console()
+                        console.print()
+                        console.print(
+                            f"  [bold yellow][!] Hostname detected via redirect:[/] "
+                            f"[bold cyan]{host}[/]"
+                        )
+                        console.print(
+                            f"      Add to /etc/hosts:  "
+                            f"[bold]echo \"{target} {host}\" >> /etc/hosts[/]"
+                        )
+                        console.print(
+                            f"      Or re-run with:     "
+                            f"[bold]reconninja {target} --htb --add-hosts[/]"
+                        )
+                        console.print()
+                        findings.append(
+                            Finding(
+                                severity=Severity.HIGH,
+                                title=f"Hostname redirect detected: {host}",
+                                description=(
+                                    f"Server redirects to hostname {host} which is not in /etc/hosts. "
+                                    f"Add it with: echo \"{target} {host}\" >> /etc/hosts"
+                                ),
+                                module="web_core",
+                                evidence=f"301 redirect to {host}",
+                                suggested_commands=[
+                                    f'echo "{target} {host}" >> /etc/hosts',
+                                    f"reconninja {target} --htb --add-hosts",
+                                ],
+                            )
+                        )
+
+            # Security headers
+            sec_findings = _check_security_headers(headers, url)
+            findings.extend(sec_findings)
     else:
         logger.warning("curl not found — skipping header analysis")
         raw_parts.append("=== curl === SKIPPED (not found)")
@@ -328,6 +361,8 @@ async def run_web_core(
             timeout=config.default_timeout,
         )
         raw_parts.append(f"=== whatweb ===\n{stdout}")
+        if rc != 0 and stderr.strip():
+            raw_parts.append(f"=== whatweb (error) ===\n{stderr}")
 
         if rc == 0 and stdout.strip():
             tech_map = _parse_whatweb(stdout)
@@ -388,25 +423,31 @@ async def run_web_core(
             timeout=config.default_timeout,
         )
         raw_parts.append(f"=== wafw00f ===\n{stdout}")
+        if rc != 0 and stderr.strip():
+            raw_parts.append(f"=== wafw00f (error) ===\n{stderr}")
 
         # Parse for "is behind" or "Firewall detected"
+        detected_wafs = []
         for line in stdout.splitlines():
             line_lower = line.lower()
             if "is behind" in line_lower or "firewall" in line_lower:
                 waf_name = line.strip()
-                findings.append(
-                    Finding(
-                        severity=Severity.INFO,
-                        title=f"WAF detected: {waf_name}",
-                        description=f"Web Application Firewall detected on {url}",
-                        module="web_core",
-                        evidence=waf_name,
-                        suggested_commands=[
-                            f"wafw00f -a {url}",
-                        ],
-                    )
+                if waf_name not in detected_wafs:
+                    detected_wafs.append(waf_name)
+
+        for waf_name in detected_wafs:
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    title=f"WAF detected: {waf_name}",
+                    description=f"Web Application Firewall detected on {url}",
+                    module="web_core",
+                    evidence=waf_name,
+                    suggested_commands=[
+                        f"wafw00f -a {url}",
+                    ],
                 )
-                break  # only flag the first match
+            )
     else:
         logger.debug("wafw00f not found — skipping WAF detection")
         raw_parts.append("=== wafw00f === SKIPPED (not found)")
@@ -419,21 +460,46 @@ async def run_web_core(
             fetch_url = f"{url}/{path}"
             outfile = output_dir / path.replace(".", "_")
             rc, stdout, stderr = await run_tool(
-                cmd=["curl", "-sL", "--max-time", "10", fetch_url],
-                output_file=outfile,
-                timeout=15,
+                cmd=[
+                    "curl", "-sL",
+                    "-w", "%{http_code}",
+                    "-o", str(outfile),
+                    "--max-time", str(config.default_timeout),
+                    fetch_url
+                ],
+                timeout=config.default_timeout,
             )
-            if rc == 0 and stdout.strip() and "<!doctype" not in stdout.lower()[:100]:
-                raw_parts.append(f"=== {path} ===\n{stdout[:2000]}")
-                findings.append(
-                    Finding(
-                        severity=Severity.INFO,
-                        title=f"Discovered /{path}",
-                        description=f"/{path} is accessible on {url} ({len(stdout)} bytes)",
-                        module="web_core",
-                        evidence=stdout[:500],
-                    )
+            if rc != 0 and stderr.strip():
+                raw_parts.append(f"=== {path} (error) ===\n{stderr}")
+
+            valid = False
+            if rc == 0 and stdout.strip() == "200" and outfile.is_file():
+                content = outfile.read_text(encoding="utf-8", errors="replace")
+                content_lower = content.lower()
+                is_html = (
+                    "<!doctype" in content_lower[:200]
+                    or "<html" in content_lower[:200]
+                    or "<body" in content_lower[:200]
+                    or "<head" in content_lower[:200]
                 )
+                if content.strip() and not is_html:
+                    valid = True
+                    raw_parts.append(f"=== {path} ===\n{content[:2000]}")
+                    findings.append(
+                        Finding(
+                            severity=Severity.INFO,
+                            title=f"Discovered /{path}",
+                            description=f"/{path} is accessible on {url} ({len(content)} bytes)",
+                            module="web_core",
+                            evidence=content[:500],
+                        )
+                    )
+
+            if not valid:
+                try:
+                    outfile.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------
     # 5. gowitness — screenshot
@@ -441,18 +507,39 @@ async def run_web_core(
     if shutil.which("gowitness"):
         screenshot_dir = output_dir / "screenshots"
         screenshot_dir.mkdir(parents=True, exist_ok=True)
+        # Try modern command first: gowitness scan single
         rc, stdout, stderr = await run_tool(
             cmd=[
-                "gowitness", "single",
+                "gowitness", "scan", "single",
                 url,
                 "--screenshot-path", str(screenshot_dir),
             ],
             timeout=60,
         )
+        if rc != 0:
+            logger.debug("gowitness scan single failed (rc=%d), trying fallback gowitness single", rc)
+            rc, stdout, stderr = await run_tool(
+                cmd=[
+                    "gowitness", "single",
+                    url,
+                    "--screenshot-path", str(screenshot_dir),
+                ],
+                timeout=60,
+            )
+
         if rc == 0:
             raw_parts.append(f"=== gowitness === Screenshot saved to {screenshot_dir}")
         else:
             raw_parts.append(f"=== gowitness === Failed: {stderr[:200]}")
+            findings.append(
+                Finding(
+                    severity=Severity.INFO,
+                    title="Gowitness screenshot failed",
+                    description=f"gowitness was unable to capture a screenshot of {url}.",
+                    module="web_core",
+                    evidence=f"Exit code: {rc}\nStderr: {stderr[:500]}",
+                )
+            )
     else:
         logger.debug("gowitness not found — skipping screenshot")
         raw_parts.append("=== gowitness === SKIPPED (not found)")
@@ -461,11 +548,15 @@ async def run_web_core(
     # Done
     # ------------------------------------------------------------------
     combined_raw = "\n\n".join(raw_parts)
+    raw_len = len(combined_raw)
+    raw_truncated = combined_raw[:8000]
+    if raw_len > 8000:
+        raw_truncated += "\n[TRUNCATED]"
 
     return ModuleResult(
         module_name="web_core",
         status="done",
         findings=findings,
-        raw_output=combined_raw[:8000],
+        raw_output=raw_truncated,
         duration_seconds=time.monotonic() - t0,
     )

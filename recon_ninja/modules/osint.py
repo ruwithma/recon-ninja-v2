@@ -587,7 +587,7 @@ async def run_osint_module(
     new_count = 0
     for sub in unique_subdomains:
         if sub not in state.hostnames:
-            state.hostnames.append(sub)
+            state.add_hostname(sub)
             new_count += 1
 
     if unique_subdomains:

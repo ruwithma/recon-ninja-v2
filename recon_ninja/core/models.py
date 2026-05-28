@@ -198,6 +198,11 @@ class ModuleResult:
     duration_seconds: float = 0.0
     error_message: str = ""
 
+    def __post_init__(self) -> None:
+        if len(self.raw_output) > 10000 and not self.raw_output.endswith("[TRUNCATED]"):
+            self.raw_output = self.raw_output[:10000] + "\n[TRUNCATED]"
+
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly dictionary."""
         return {
@@ -248,6 +253,20 @@ class ScanState:
     available_tools: dict[str, bool] = field(default_factory=dict)
     current_phase: int = 0
     end_time: datetime | None = None
+
+    def __post_init__(self) -> None:
+        self._hostname_set = set(self.hostnames)
+
+    def add_hostname(self, hostname: str) -> None:
+        """Add a hostname to the state list, preventing duplicates in a thread-safe manner."""
+        if not hostname:
+            return
+        if not hasattr(self, "_hostname_set"):
+            self._hostname_set = set(self.hostnames)
+        if hostname not in self._hostname_set:
+            self._hostname_set.add(hostname)
+            self.hostnames.append(hostname)
+
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-friendly dictionary."""

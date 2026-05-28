@@ -520,34 +520,37 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
         "meta-author", "script", "frame", "passwordfield",
     }
 
-    for match in re.finditer(r"(\w[\w\s\-]*?)\[([^\]]+)\]", raw):
-        name = match.group(1).strip()
-        detail = match.group(2).strip()
+    for line in raw.splitlines():
+        # Strip URL and status code prefix
+        line_clean = re.sub(r"^(?:https?://)?\S+\s+\[\d{3}(?:\s+[^\]]*)?\]", "", line, flags=re.IGNORECASE)
+        for match in re.finditer(r"(\w[\w\s\-]*?)\[([^\]]+)\]", line_clean):
+            name = match.group(1).strip()
+            detail = match.group(2).strip()
 
-        if name.isdigit() or name.startswith("http"):
-            continue
+            if name.isdigit() or name.startswith("http"):
+                continue
 
-        if name.lower() in _WHATWEB_METADATA_FIELDS:
-            continue
+            if name.lower() in _WHATWEB_METADATA_FIELDS:
+                continue
 
-        category, confidence = whatweb_categories.get(name, ("", "probable"))
-        version = ""
-        ver_match = re.search(r"[\d]+[\d.]*[a-z0-9]*", detail)
-        if ver_match:
-            version = ver_match.group(0)
+            category, confidence = whatweb_categories.get(name, ("", "probable"))
+            version = ""
+            ver_match = re.search(r"[\d]+[\d.]*[a-z0-9]*", detail)
+            if ver_match:
+                version = ver_match.group(0)
 
-        cves = _check_known_vulns(name, version) if version else []
+            cves = _check_known_vulns(name, version) if version else []
 
-        techs.append(TechInfo(
-            name=name,
-            version=version,
-            category=category,
-            confidence=confidence,
-            source="whatweb",
-            port=port,
-            cves=cves,
-            is_vulnerable=bool(cves),
-        ))
+            techs.append(TechInfo(
+                name=name,
+                version=version,
+                category=category,
+                confidence=confidence,
+                source="whatweb",
+                port=port,
+                cves=cves,
+                is_vulnerable=bool(cves),
+            ))
 
     return techs
 
