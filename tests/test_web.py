@@ -314,3 +314,33 @@ class TestRecursiveVhostScanQueue:
         assert result.status == "done"
         # It should have scanned the initial target IP, then processed the newly discovered vhost from the queue
         assert scanned_hosts == ["10.129.7.81", "models.smarthire.htb"]
+
+
+class TestFeroxbusterCommandGen:
+    @pytest.mark.asyncio
+    async def test_feroxbuster_cmd_adaptive(self, tmp_path: Path) -> None:
+        state = _make_web_state(tmp_path)
+        config = ReconConfig(adaptive_fuzz=True)
+        config.web_wordlist = Path("/tmp/configured_wordlist.txt")
+
+        def which_side_effect(cmd: str):
+            return "/usr/bin/feroxbuster" if cmd == "feroxbuster" else None
+
+        captured_cmds = []
+        async def run_tool_side_effect(*args, **kwargs):
+            captured_cmds.append(kwargs.get("cmd", args[0] if args else []))
+            return 0, "", ""
+
+        with (
+            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
+            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect),
+            patch("recon_ninja.modules.web.web_dirfuzz.Path.is_file", return_value=True),
+        ):
+            await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+
+        # Stage 1 cmd should be in captured_cmds
+        assert len(captured_cmds) >= 1
+        stage1_cmd = captured_cmds[0]
+        assert "feroxbuster" in stage1_cmd
+        assert "--no-recursion" in stage1_cmd
+        assert "--depth" not in stage1_cmd
