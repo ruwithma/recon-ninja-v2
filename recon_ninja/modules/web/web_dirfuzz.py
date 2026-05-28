@@ -21,6 +21,7 @@ Implements Steps 2 and 3 of the web module specification:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shutil
@@ -168,9 +169,9 @@ def _parse_feroxbuster(raw: str) -> list[tuple[int, str, int]]:
         List of (status_code, path, size) tuples.
     """
     results: list[tuple[int, str, int]] = []
-    # Match lines: STATUS  METHOD  SIZE  URL
+    # Match lines: STATUS  METHOD  [optional columns]  SIZE  URL
     pattern = re.compile(
-        r"^(\d{3})\s+\w+\s+(\d+\w?)\s+(https?://\S+)$", re.MULTILINE,
+        r"^(\d{3})\s+\w+\s+(?:[\d\w]+\s+)*(\d+)[a-zA-Z]?\s+(https?://\S+)$", re.MULTILINE,
     )
     for match in pattern.finditer(raw):
         status = int(match.group(1))
@@ -242,26 +243,28 @@ def _severity_for_status(status: int, path: str) -> Severity:
     return Severity.INFO
 
 
-async def _head_status(url: str, path: str) -> int | None:
-    """Run a HEAD request and return the HTTP status code if available."""
+async def _head_status(url: str, path: str) -> tuple[int | None, str]:
+    """Run a HEAD request and return the HTTP status code and redirect URL if available."""
     full_url = f"{url}{path}"
     try:
         _rc, stdout, _stderr = await run_tool(
             cmd=[
-                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code} %{redirect_url}",
                 "--connect-timeout", "3",
                 "--max-time", "5",
                 full_url,
             ],
             timeout=10,  # generous — curl's own --max-time handles the real limit
         )
-        status_str = stdout.strip()
-        if not status_str:
-            return None
-        return int(status_str)
+        parts = stdout.strip().split(maxsplit=1)
+        if not parts:
+            return None, ""
+        status_code = int(parts[0]) if parts[0].isdigit() else None
+        redirect_url = parts[1] if len(parts) > 1 else ""
+        return status_code, redirect_url
     except Exception as exc:
         logger.debug("Error checking %s: %s", full_url, exc)
-        return None
+        return None, ""
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +277,7 @@ async def _check_path(
     path: str,
     severity: Severity,
     baseline_status: int | None = None,
+    baseline_redirect: str = "",
 ) -> Finding | None:
     """Send a HEAD request via curl and return a Finding if the path exists.
 
@@ -293,7 +297,7 @@ async def _check_path(
     """
     full_url = f"{url}{path}"
     try:
-        status = await _head_status(url, path)
+        status, redirect_url = await _head_status(url, path)
         if status is None:
             return None
         if status == 0 or status >= 500:
@@ -301,7 +305,11 @@ async def _check_path(
         if status == 404:
             return None
         if baseline_status is not None and status == baseline_status:
-            return None
+            if status in (301, 302, 307, 308):
+                if redirect_url == baseline_redirect:
+                    return None
+            else:
+                return None
 
         # Path exists — adjust severity
         actual_sev = _severity_for_status(status, path)
@@ -374,6 +382,7 @@ async def run_web_dirfuzz(
     threads = "10" if port not in (80, 443) else "20"
     depth = "1" if config.fast_mode else "2"
     baseline_status: int | None = None
+    baseline_redirect: str = ""
 
     # ------------------------------------------------------------------
     # 1. Common path probing (async HEAD requests) — run FIRST
@@ -381,7 +390,7 @@ async def run_web_dirfuzz(
     #    hammers the target (which could trigger WAF/rate-limiting).
     # ------------------------------------------------------------------
     if shutil.which("curl"):
-        baseline_status = await _head_status(url, "/rn_404_baseline_check")
+        baseline_status, baseline_redirect = await _head_status(url, "/rn_404_baseline_check")
 
         # Run HEAD checks concurrently (bounded)
         semaphore = asyncio.Semaphore(5)
@@ -390,7 +399,7 @@ async def run_web_dirfuzz(
             u: str, p: str, s: Severity,
         ) -> Finding | None:
             async with semaphore:
-                return await _check_path(u, p, s, baseline_status)
+                return await _check_path(u, p, s, baseline_status, baseline_redirect)
 
         head_tasks = [
             asyncio.create_task(_bounded_check(url, path, sev))
@@ -480,21 +489,23 @@ async def run_web_dirfuzz(
     # ------------------------------------------------------------------
     vhost_hostname = hostname or state.primary_hostname
     if vhost_hostname:
-        vhost_wordlist = str(
-            config.web_wordlist.parent.parent / "Discovery" / "DNS" / "subdomains-top1million-5000.txt"
-        )
+        vhost_wordlist = str(config.dns_wordlist)
 
         if shutil.which("gobuster"):
             vhost_out = output_dir / "gobuster_vhost.txt"
+            # Modern gobuster vhost requires -u to be the URL (which can have the hostname in it)
+            # and --append-domain to test FUZZ.domain instead of just testing the raw word
+            vhost_url = url
+            cmd = [
+                "gobuster", "vhost",
+                "-u", vhost_url,
+                "-w", vhost_wordlist,
+                "--append-domain",
+                "-t", "20",
+                "-q",
+            ]
             rc, stdout, stderr = await run_tool(
-                cmd=[
-                    "gobuster", "vhost",
-                    "-u", url,
-                    "-w", vhost_wordlist,
-                    "--hostname", vhost_hostname,
-                    "-t", "20",
-                    "-q",
-                ],
+                cmd=cmd,
                 output_file=vhost_out,
                 timeout=config.default_timeout,
             )
@@ -502,7 +513,7 @@ async def run_web_dirfuzz(
 
             if stdout.strip():
                 for line in stdout.splitlines():
-                    if "Status:" in line:
+                    if "Found:" in line or "Status:" in line:
                         findings.append(
                             Finding(
                                 severity=Severity.INFO,
@@ -514,7 +525,7 @@ async def run_web_dirfuzz(
                         )
 
         elif shutil.which("ffuf"):
-            vhost_out = output_dir / "ffuf_vhost.txt"
+            vhost_out = output_dir / "ffuf_vhost.json"
             rc, stdout, stderr = await run_tool(
                 cmd=[
                     "ffuf",
@@ -522,12 +533,34 @@ async def run_web_dirfuzz(
                     "-H", f"Host: FUZZ.{vhost_hostname}",
                     "-w", vhost_wordlist,
                     "-mc", "200,301,302",
+                    "-ac",  # auto-calibrate to filter out baseline noise/size
                     "-o", str(vhost_out),
+                    "-of", "json",
                 ],
                 output_file=vhost_out,
                 timeout=config.default_timeout,
             )
             raw_parts.append(f"=== ffuf vhost ===\n{stdout[:3000]}")
+
+            if vhost_out.is_file():
+                try:
+                    ffuf_data = json.loads(vhost_out.read_text(encoding="utf-8", errors="replace"))
+                    for entry in ffuf_data.get("results", []):
+                        vhost_found = entry.get("host", "")
+                        status_found = entry.get("status", 0)
+                        size_found = entry.get("size", 0)
+                        if vhost_found:
+                            findings.append(
+                                Finding(
+                                    severity=Severity.INFO,
+                                    title=f"Vhost found: {vhost_found} (HTTP {status_found}, {size_found}B)",
+                                    description=f"Virtual host discovered on {url}: {vhost_found}",
+                                    module="web_dirfuzz",
+                                    evidence=f"Host: {vhost_found} Status: {status_found} Size: {size_found}",
+                                )
+                            )
+                except Exception as exc:
+                    logger.debug("Failed to parse ffuf vhost output: %s", exc)
     else:
         logger.debug("No hostname known — skipping vhost scan")
 

@@ -7,6 +7,7 @@ and manages concurrent module execution with graceful error handling.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import time
@@ -654,11 +655,80 @@ class ReconEngine:
             logger.debug("theHarvester not found — skipping")
 
         if commands:
-            await run_multiple(
+            results = await run_multiple(
                 commands,
                 max_concurrent=3,
                 timeout=self.config.default_timeout,
             )
+
+            # Parse discovered subdomains
+            subdomains: set[str] = set()
+
+            # 1. Parse subfinder output
+            subfinder_out = self.output_dir / "subfinder.txt"
+            if subfinder_out.is_file():
+                try:
+                    content = subfinder_out.read_text(encoding="utf-8", errors="replace")
+                    for line in content.splitlines():
+                        sub = line.strip().lower()
+                        if sub and "." in sub:
+                            subdomains.add(sub)
+                except Exception as exc:
+                    logger.debug("Failed to parse subfinder output: %s", exc)
+
+            # 2. Parse dnsrecon output (JSON)
+            dnsrecon_out = self.output_dir / "dnsrecon.json"
+            if dnsrecon_out.is_file():
+                try:
+                    content = dnsrecon_out.read_text(encoding="utf-8", errors="replace")
+                    if content.strip():
+                        records = json.loads(content)
+                        for rec in records:
+                            if isinstance(rec, dict):
+                                name = rec.get("name", "").strip().lower()
+                                if name and "." in name:
+                                    subdomains.add(name)
+                                target_host = rec.get("target", "").strip().lower()
+                                if target_host and "." in target_host:
+                                    subdomains.add(target_host)
+                except Exception as exc:
+                    logger.debug("Failed to parse dnsrecon JSON: %s", exc)
+
+            # 3. Parse theHarvester output (JSON)
+            harvester_out = self.output_dir / "harvester.json"
+            if harvester_out.is_file():
+                try:
+                    content = harvester_out.read_text(encoding="utf-8", errors="replace")
+                    if content.strip():
+                        data = json.loads(content)
+                        for host in data.get("hosts", []):
+                            if isinstance(host, str):
+                                sub = host.strip().lower()
+                                if sub and "." in sub:
+                                    subdomains.add(sub)
+                except Exception as exc:
+                    logger.debug("Failed to parse harvester JSON: %s", exc)
+
+            # Add discovered subdomains to state and findings
+            if subdomains:
+                for sub in subdomains:
+                    if sub not in self.state.hostnames:
+                        self.state.hostnames.append(sub)
+
+                sublist = sorted(list(subdomains))
+                self.state.add_finding(
+                    Finding(
+                        severity=Severity.INFO,
+                        title=f"OSINT subdomains discovered ({len(sublist)} subdomains)",
+                        description=(
+                            f"Passive and active DNS/OSINT tools discovered {len(sublist)} subdomains:\n"
+                            + "\n".join(f"  - {sub}" for sub in sublist[:50])
+                            + (f"\n  ... and {len(sublist) - 50} more" if len(sublist) > 50 else "")
+                        ),
+                        evidence="\n".join(sublist),
+                        module="osint",
+                    )
+                )
 
     # ------------------------------------------------------------------
     # Phase 5 — Vulnerability Correlation
@@ -677,6 +747,7 @@ class ReconEngine:
             return
 
         commands: list[tuple[str, list[str], Path | None]] = []
+        query_map: dict[str, str] = {}
 
         # --- searchsploit from nmap services ---
         if shutil.which("searchsploit"):
@@ -685,11 +756,13 @@ class ReconEngine:
                 if svc.product and svc.version:
                     query = f"{svc.product} {svc.version}"
                     outfile = self.output_dir / f"searchsploit_{svc.port}.txt"
+                    cmd_name = f"searchsploit-{svc.port}"
                     commands.append((
-                        f"searchsploit-{svc.port}",
+                        cmd_name,
                         ["searchsploit", "--json", query],
                         outfile,
                     ))
+                    query_map[cmd_name] = query
 
             # Build queries from detected web technologies
             for tech in self.state.detected_techs:
@@ -703,11 +776,13 @@ class ReconEngine:
                         query = f"{tech.name} {tech.version}"
                         safe_name = tech.name.lower().replace(" ", "_").replace("/", "_")
                         outfile = self.output_dir / f"searchsploit_tech_{safe_name}_{tech.port}.txt"
+                        cmd_name = f"searchsploit-tech-{safe_name}-{tech.port}"
                         commands.append((
-                            f"searchsploit-tech-{safe_name}-{tech.port}",
+                            cmd_name,
                             ["searchsploit", "--json", query],
                             outfile,
                         ))
+                        query_map[cmd_name] = query
 
         # --- nuclei ---
         if shutil.which("nuclei"):
@@ -753,11 +828,11 @@ class ReconEngine:
             if "searchsploit" in name and stdout.strip():
                 # Try to parse JSON output for better findings
                 exploits_found = self._parse_searchsploit_json(stdout, name)
+                query = query_map.get(name, "")
                 if exploits_found:
-                    severity = Severity.HIGH if len(exploits_found) > 3 else Severity.MEDIUM
                     self.state.add_finding(
                         Finding(
-                            severity=severity,
+                            severity=Severity.INFO,
                             title=f"Exploits found: {name} ({len(exploits_found)} results)",
                             description=(
                                 f"searchsploit found {len(exploits_found)} potential exploits. "
@@ -766,7 +841,7 @@ class ReconEngine:
                             evidence=stdout[:2000],
                             module="vuln_correlate",
                             suggested_commands=[
-                                f"searchsploit -x {name.split('-')[-1]}  # Examine exploit details",
+                                f"searchsploit {query}" if query else "searchsploit",
                             ],
                         )
                     )

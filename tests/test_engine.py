@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock
 from datetime import datetime
+import pytest
 
 from recon_ninja.core.engine import ReconEngine, parse_nmap_xml, PHASE_NAMES
 from recon_ninja.core.models import ScanState, ServiceInfo, ReconConfig
@@ -341,3 +342,44 @@ class TestParsingHelpers:
         output = "22/tcp open ssh\n80/tcp open http"
         ports = ReconEngine._parse_nmap_grep_ports(output)
         assert ports == [22, 80]
+
+    @pytest.mark.asyncio
+    async def test_phase4_osint_parses_subdomains(self, tmp_path: Path) -> None:
+        from unittest.mock import AsyncMock, patch
+        from recon_ninja.core.engine import ReconEngine
+        from recon_ninja.core.models import ReconConfig, ScanState
+        from datetime import datetime
+
+        state = ScanState(
+            target="smarthire.htb",
+            start_time=datetime.now(),
+            output_dir=tmp_path,
+        )
+        config = ReconConfig()
+        config.is_domain = True
+        engine = ReconEngine(target="smarthire.htb", state=state, config=config)
+
+        # Write dummy OSINT files to output_dir
+        (tmp_path / "subfinder.txt").write_text("admin.smarthire.htb\nmail.smarthire.htb\n", encoding="utf-8")
+        (tmp_path / "dnsrecon.json").write_text('[{"name": "www.smarthire.htb", "type": "A"}]', encoding="utf-8")
+        (tmp_path / "harvester.json").write_text('{"hosts": ["vpn.smarthire.htb"]}', encoding="utf-8")
+
+        def which_side_effect(cmd: str):
+            return "/usr/bin/" + cmd
+
+        with (
+            patch("recon_ninja.core.engine.shutil.which", side_effect=which_side_effect),
+            patch("recon_ninja.core.engine.run_multiple", new_callable=AsyncMock) as mock_run,
+        ):
+            await engine.phase4_osint()
+
+        assert "admin.smarthire.htb" in engine.state.hostnames
+        assert "mail.smarthire.htb" in engine.state.hostnames
+        assert "www.smarthire.htb" in engine.state.hostnames
+        assert "vpn.smarthire.htb" in engine.state.hostnames
+
+        # Verify a finding was created
+        osint_findings = [f for f in engine.state.all_findings if f.module == "osint"]
+        assert len(osint_findings) == 1
+        assert "OSINT subdomains discovered" in osint_findings[0].title
+        assert "admin.smarthire.htb" in osint_findings[0].evidence

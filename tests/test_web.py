@@ -125,10 +125,10 @@ class TestWebDirfuzzHeadChecks:
             full_url = kwargs["cmd"][-1]
             path = urlsplit(full_url).path
             if path == "/rn_404_baseline_check":
-                return 0, "301", ""
+                return 0, "301 http://smarthire.htb/", ""
             if path == "/admin":
                 return 0, "200", ""
-            return 0, "301", ""
+            return 0, "301 http://smarthire.htb/", ""
 
         with (
             patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
@@ -138,3 +138,59 @@ class TestWebDirfuzzHeadChecks:
 
         titles = [finding.title for finding in result.findings]
         assert titles == ["Path found: /admin (HTTP 200)"]
+
+
+class TestFeroxbusterParser:
+    def test_parses_v1_and_v2_formats(self) -> None:
+        from recon_ninja.modules.web.web_dirfuzz import _parse_feroxbuster
+        
+        # v1.x output style (4 columns)
+        v1_raw = "200      GET       48l http://10.129.7.182/admin\n301      GET        5l http://10.129.7.182/dashboard"
+        results_v1 = _parse_feroxbuster(v1_raw)
+        assert len(results_v1) == 2
+        assert results_v1[0] == (200, "http://10.129.7.182/admin", 48)
+        assert results_v1[1] == (301, "http://10.129.7.182/dashboard", 5)
+
+        # v2.x output style (6 columns)
+        v2_raw = "200      GET       48l      128w     2345c http://10.129.7.182/admin\n301      GET        5l       10w      150c http://10.129.7.182/dashboard"
+        results_v2 = _parse_feroxbuster(v2_raw)
+        assert len(results_v2) == 2
+        assert results_v2[0] == (200, "http://10.129.7.182/admin", 2345)
+        assert results_v2[1] == (301, "http://10.129.7.182/dashboard", 150)
+
+
+class TestWebTechVulnBounds:
+    def test_eol_version_boundaries(self) -> None:
+        from recon_ninja.modules.web.web_tech import _check_known_vulns
+        
+        # nginx EOL prefix "1.1" should NOT match "1.18.0"
+        cves_1_18 = _check_known_vulns("nginx", "1.18.0")
+        assert "EOL" not in cves_1_18
+        
+        # nginx EOL prefix "1.1" should match "1.1.2"
+        cves_1_1 = _check_known_vulns("nginx", "1.1.2")
+        assert "EOL" in cves_1_1
+
+        # vsftpd exact/prefix "2.3.4" should match "2.3.4"
+        cves_vsftpd = _check_known_vulns("vsftpd", "2.3.4")
+        assert "CVE-2011-2523" in cves_vsftpd
+
+
+class TestWhatwebExclusions:
+    def test_ignores_metadata_fields(self) -> None:
+        from recon_ninja.modules.web.web_tech import _detect_from_whatweb
+        
+        raw_whatweb = (
+            "http://10.129.7.182 [200 OK] IP[10.129.7.182] Title[SmartHire] "
+            "Country[RESERVED] Apache[2.4.41] Nginx[1.18.0]"
+        )
+        techs = _detect_from_whatweb(raw_whatweb, 80)
+        
+        names = {t.name for t in techs}
+        # Metadata should be skipped
+        assert "IP" not in names
+        assert "Title" not in names
+        assert "Country" not in names
+        # Actual technologies should be parsed
+        assert "Apache" in names
+        assert "Nginx" in names

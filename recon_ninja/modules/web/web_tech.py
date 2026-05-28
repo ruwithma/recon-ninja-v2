@@ -98,17 +98,17 @@ KNOWN_VULN_DB: dict[tuple[str, str], list[str]] = {
     ("proftpd", "1.3.5"): ["CVE-2015-3306"],
     # PHP
     ("php", "7.2"): ["CVE-2022-31615"],
-    ("php", "5."): ["CVE-EOL"],
-    ("php", "7.0"): ["CVE-EOL"],
-    ("php", "7.1"): ["CVE-EOL"],
+    ("php", "5."): ["EOL"],
+    ("php", "7.0"): ["EOL"],
+    ("php", "7.1"): ["EOL"],
     # nginx
-    ("nginx", "0."): ["CVE-EOL"],
-    ("nginx", "1.0"): ["CVE-EOL"],
-    ("nginx", "1.1"): ["CVE-EOL"],
+    ("nginx", "0."): ["EOL"],
+    ("nginx", "1.0"): ["EOL"],
+    ("nginx", "1.1"): ["EOL"],
     # Node.js / Express
-    ("node.js", "8"): ["CVE-EOL"],
-    ("node.js", "10"): ["CVE-EOL"],
-    ("node.js", "12"): ["CVE-EOL"],
+    ("node.js", "8"): ["EOL"],
+    ("node.js", "10"): ["EOL"],
+    ("node.js", "12"): ["EOL"],
     # WordPress
     ("wordpress", "4."): ["CVE-2019-8943", "CVE-2019-8942"],
     ("wordpress", "5.0"): ["CVE-2019-8943"],
@@ -122,7 +122,7 @@ KNOWN_VULN_DB: dict[tuple[str, str], list[str]] = {
     ("tomcat", "8.5."): ["CVE-2020-1938"],
     ("tomcat", "9.0."): ["CVE-2020-1938"],
     # Spring Boot
-    ("spring", "1.5"): ["CVE-EOL"],
+    ("spring", "1.5"): ["EOL"],
     # IIS
     ("iis", "6.0"): ["CVE-2017-7269"],
     ("iis", "7.5"): ["CVE-2015-1635"],
@@ -130,9 +130,9 @@ KNOWN_VULN_DB: dict[tuple[str, str], list[str]] = {
     ("openssl", "1.0.1"): ["CVE-2014-0160"],  # Heartbleed
     ("openssl", "1.0.2"): ["CVE-2016-0800"],
     # Django
-    ("django", "1."): ["CVE-EOL"],
-    ("django", "2.0"): ["CVE-EOL"],
-    ("django", "2.1"): ["CVE-EOL"],
+    ("django", "1."): ["EOL"],
+    ("django", "2.0"): ["EOL"],
+    ("django", "2.1"): ["EOL"],
     # jQuery
     ("jquery", "1."): ["CVE-2020-11022"],
     ("jquery", "2."): ["CVE-2020-11022"],
@@ -140,11 +140,11 @@ KNOWN_VULN_DB: dict[tuple[str, str], list[str]] = {
     # Next.js
     ("next.js", "9."): ["CVE-2021-22893"],
     # Flask
-    ("flask", "0."): ["CVE-EOL"],
+    ("flask", "0."): ["EOL"],
     # Ruby on Rails
-    ("ruby on rails", "3."): ["CVE-EOL"],
-    ("ruby on rails", "4."): ["CVE-EOL"],
-    ("ruby on rails", "5.0"): ["CVE-EOL"],
+    ("ruby on rails", "3."): ["EOL"],
+    ("ruby on rails", "4."): ["EOL"],
+    ("ruby on rails", "5.0"): ["EOL"],
 }
 
 # ---------------------------------------------------------------------------
@@ -308,6 +308,11 @@ def _check_known_vulns(name: str, version: str) -> list[str]:
 
     for (tech_key, ver_prefix), vuln_cves in KNOWN_VULN_DB.items():
         if tech_key == name_lower and version.startswith(ver_prefix):
+            # Check if the character following the prefix is a digit.
+            # If so, this is a longer version number (e.g. prefix "1.1" matching "1.18.0").
+            prefix_len = len(ver_prefix)
+            if len(version) > prefix_len and version[prefix_len].isdigit():
+                continue
             cves.extend(vuln_cves)
 
     return cves
@@ -508,11 +513,21 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
         "ModSecurity": ("waf", "certain"),
     }
 
+    _WHATWEB_METADATA_FIELDS = {
+        "ip", "title", "country", "httpserver", "redirectlocation",
+        "cookies", "email", "uncommonheaders", "html5", "x-frame-options",
+        "x-xss-protection", "strict-transport-security", "x-powered-by",
+        "meta-author", "script", "frame", "passwordfield",
+    }
+
     for match in re.finditer(r"(\w[\w\s\-]*?)\[([^\]]+)\]", raw):
         name = match.group(1).strip()
         detail = match.group(2).strip()
 
         if name.isdigit() or name.startswith("http"):
+            continue
+
+        if name.lower() in _WHATWEB_METADATA_FIELDS:
             continue
 
         category, confidence = whatweb_categories.get(name, ("", "probable"))
@@ -896,20 +911,34 @@ async def run_web_tech(
     vulnerable = [t for t in port_techs if t.is_vulnerable]
     for vtech in vulnerable:
         cve_list = ", ".join(vtech.cves)
-        findings.append(Finding(
-            severity=Severity.HIGH if "EOL" not in cve_list else Severity.MEDIUM,
-            title=f"Vulnerable tech: {vtech.name} {vtech.version} ({cve_list})",
-            description=(
+        is_eol = "EOL" in vtech.cves or "CVE-EOL" in vtech.cves
+
+        if is_eol:
+            title = f"End-of-Life software detected: {vtech.name} {vtech.version}"
+            description = (
+                f"{vtech.name} {vtech.version} on port {port} is End-of-Life (EOL) and no longer supported. "
+                f"Detected via {vtech.source}."
+            )
+            severity = Severity.MEDIUM
+        else:
+            title = f"Vulnerable tech: {vtech.name} {vtech.version} ({cve_list})"
+            description = (
                 f"{vtech.name} {vtech.version} on port {port} has known vulnerabilities: {cve_list}. "
                 f"Detected via {vtech.source}."
-            ),
+            )
+            severity = Severity.HIGH
+
+        findings.append(Finding(
+            severity=severity,
+            title=title,
+            description=description,
             module="web_tech",
             evidence=f"{vtech.name} {vtech.version} → {cve_list}",
-            cve=vtech.cves[0] if len(vtech.cves) == 1 else None,
+            cve=vtech.cves[0] if (len(vtech.cves) == 1 and not is_eol) else None,
             suggested_commands=[
                 f"searchsploit {vtech.name} {vtech.version}",
                 f"nuclei -u {url} -t cves/",
-            ] if vtech.cves else [],
+            ] if not is_eol else [],
         ))
 
     # ------------------------------------------------------------------
