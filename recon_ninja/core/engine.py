@@ -11,7 +11,6 @@ import json
 import logging
 import shutil
 import time
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,6 +31,7 @@ from recon_ninja.core.models import (
 )
 from recon_ninja.core.runner import run_multiple, run_tool
 from recon_ninja.utils.network import is_root
+from recon_ninja.utils.nmap_parser import parse_nmap_xml
 
 logger = logging.getLogger(__name__)
 
@@ -52,110 +52,11 @@ PHASE_NAMES: dict[int, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Nmap XML parser (standalone — no external dependency)
+# Nmap XML parser — imported from utils.nmap_parser
 # ---------------------------------------------------------------------------
 
-
-def parse_nmap_xml(xml_path: Path) -> dict[int, ServiceInfo]:
-    """Parse nmap XML output into a ``{port: ServiceInfo}`` mapping.
-
-    Handles both regular and greppable (-oX) nmap XML output.
-
-    Args:
-        xml_path: Path to the nmap XML output file.
-
-    Returns:
-        Dictionary mapping port numbers to ``ServiceInfo`` instances.
-    """
-    services: dict[int, ServiceInfo] = {}
-
-    try:
-        tree = ET.parse(str(xml_path))
-    except ET.ParseError as exc:
-        logger.error("Failed to parse nmap XML %s: %s", xml_path, exc)
-        return services
-
-    root = tree.getroot()
-
-    for host_elem in root.iter("host"):
-        # Skip hosts that are explicitly "down" — but do NOT skip when
-        # status is missing or has an unknown value.  With -Pn nmap may
-        # report the host status as unknown or omit it entirely while
-        # still providing port/service data.
-        status = host_elem.find("status")
-        if status is not None and status.get("state") == "down":
-            continue
-
-        # Determine hostname
-        hostname: str | None = None
-        hostnames_elem = host_elem.find("hostnames")
-        if hostnames_elem is not None:
-            for hname in hostnames_elem.findall("hostname"):
-                name = hname.get("name")
-                if name:
-                    hostname = name
-                    break
-
-        # Also extract hostnames from http-title script output
-        # This catches hostnames that nmap only reports in script output
-        # (common on HTB/CTF machines where DNS isn't set up)
-        http_title_hostnames: list[str] = []
-
-        ports_elem = host_elem.find("ports")
-        if ports_elem is None:
-            continue
-
-        for port_elem in ports_elem.findall("port"):
-            port_id = int(port_elem.get("portid", "0"))
-            proto = port_elem.get("protocol", "tcp")
-
-            state_elem = port_elem.find("state")
-            state = state_elem.get("state", "unknown") if state_elem is not None else "unknown"
-
-            svc_elem = port_elem.find("service")
-            service = svc_elem.get("name", "unknown") if svc_elem is not None else "unknown"
-            product = svc_elem.get("product", "") if svc_elem is not None else ""
-            version = svc_elem.get("version", "") if svc_elem is not None else ""
-            extra_info = svc_elem.get("extrainfo", "") if svc_elem is not None else ""
-
-            scripts: dict[str, str] = {}
-            for script_elem in port_elem.findall("script"):
-                sid = script_elem.get("id", "unknown")
-                soutput = script_elem.get("output", "")
-                scripts[sid] = soutput
-                # Extract hostname from http-title script
-                if sid == "http-title" and soutput:
-                    title = soutput.strip()
-                    # Only use as hostname if it looks like a domain
-                    if title and "." in title and not title.replace(".", "").isdigit():
-                        http_title_hostnames.append(title)
-
-            # Use the first http-title hostname as fallback if no <hostname> found
-            port_hostname = hostname
-            if not port_hostname and http_title_hostnames:
-                port_hostname = http_title_hostnames[0]
-
-            services[port_id] = ServiceInfo(
-                port=port_id,
-                proto=proto,
-                state=state,
-                service=service,
-                product=product,
-                version=version,
-                extra_info=extra_info,
-                scripts=scripts,
-                hostname=port_hostname,
-            )
-
-        # Store any extra http-title hostnames for the caller to process
-        if http_title_hostnames and not hostname:
-            # Attach extra hostnames as a side channel via a special
-            # key on the services dict — the engine's phase2_deep_scan
-            # will pick these up
-            for hname in http_title_hostnames:
-                services.setdefault("__extra_hostnames__", []).append(hname)  # type: ignore[assignment]
-
-    return services
+# parse_nmap_xml is now imported from recon_ninja.utils.nmap_parser at the
+# top of this file.  It returns a tuple of (services, hostnames).
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +368,7 @@ class ReconEngine:
             return
 
         if xml_out.exists():
-            services = parse_nmap_xml(xml_out)
+            services, parsed_hostnames = parse_nmap_xml(xml_out)
             self.state.services.update(services)
             logger.info("Parsed %d services from deep scan XML", len(services))
 
@@ -476,6 +377,7 @@ class ReconEngine:
             self._supplement_scripts(services)
         else:
             logger.warning("XML output file not found after deep scan")
+            parsed_hostnames = []
 
         # Detect hostnames from service info
         for svc in self.state.services.values():
@@ -509,31 +411,30 @@ class ReconEngine:
                                     f" to /etc/hosts"
                                 )
 
-        # Also pick up hostnames extracted from http-title script output
-        extra_hostnames = self.state.services.pop("__extra_hostnames__", None)  # type: ignore[arg-type]
-        if extra_hostnames:
-            for hname in extra_hostnames:
-                if hname and hname not in self.state.hostnames:
-                    self.state.add_hostname(hname)
-                    auto_add = (
-                        self.config.module_toggles.get("_add_hosts", False)
-                        or self.config.module_toggles.get("_htb", False)
-                    )
-                    if not auto_add:
-                        auto_add = is_root()
-                    from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
-                    if auto_add and get_ip_for_hostname(hname) != self.target:
-                        if add_to_hosts(self.target, hname):
-                            logger.info(
-                                "Auto-updated %s -> %s in /etc/hosts (http-title)",
-                                self.target, hname,
+        # Also register hostnames extracted from <hostname> elements and
+        # http-title script output by the parser
+        for hname in parsed_hostnames:
+            if hname and hname not in self.state.hostnames:
+                self.state.add_hostname(hname)
+                auto_add = (
+                    self.config.module_toggles.get("_add_hosts", False)
+                    or self.config.module_toggles.get("_htb", False)
+                )
+                if not auto_add:
+                    auto_add = is_root()
+                from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
+                if auto_add and get_ip_for_hostname(hname) != self.target:
+                    if add_to_hosts(self.target, hname):
+                        logger.info(
+                            "Auto-updated %s -> %s in /etc/hosts",
+                            self.target, hname,
+                        )
+                        if not self.quiet:
+                            get_console().print(
+                                f"  [bold green][+][/] Auto-added"
+                                f" [bold cyan]{hname}[/]"
+                                f" to /etc/hosts"
                             )
-                            if not self.quiet:
-                                get_console().print(
-                                    f"  [bold green][+][/] Auto-added"
-                                    f" [bold cyan]{hname}[/]"
-                                    f" to /etc/hosts (from http-title)"
-                                )
 
         # Classify the box
         self.state.box_profile = self._classify_box()
@@ -665,14 +566,10 @@ class ReconEngine:
             for finding in result.findings:
                 self.state.add_finding(finding)
 
-        # Show a quick findings summary after Phase 3 so the user gets
-        # immediate feedback without waiting for Phases 4-7 to complete.
-        if not self.quiet and self.state.all_findings:
-            from recon_ninja.core.display import display_findings_panel
-            display_findings_panel(self.state.all_findings)
-
-        # Display discovered paths and vhosts prominently before the
-        # findings panel collapses them into INFO summary.
+        # Display discovered paths and vhosts PROMINENTLY — before the
+        # findings panel collapses them into INFO summary.  CTF players
+        # need to see directories and vhosts first, not buried in a
+        # generic findings list.
         if not self.quiet:
             from recon_ninja.core.display import display_discovered_paths
             dirfuzz_findings = []
@@ -688,6 +585,12 @@ class ReconEngine:
                             dirfuzz_findings.append(f)
             if dirfuzz_findings or vhost_findings:
                 display_discovered_paths(dirfuzz_findings, vhost_findings)
+
+        # Show a quick findings summary after Phase 3 so the user gets
+        # immediate feedback without waiting for Phases 4-7 to complete.
+        if not self.quiet and self.state.all_findings:
+            from recon_ninja.core.display import display_findings_panel
+            display_findings_panel(self.state.all_findings)
 
         # Re-display the port table with tech-enriched data now that
         # Phase 3 has run technology detection.  When nmap -sV fails to

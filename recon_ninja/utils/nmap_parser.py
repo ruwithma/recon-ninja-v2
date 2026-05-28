@@ -59,58 +59,92 @@ def parse_nmap_xml(
 
     root = tree.getroot()
 
-    # -- Extract hostnames from <hostname> elements --------------------------
-    for hostname_elem in root.iter("hostname"):
-        name = hostname_elem.get("name", "").strip()
-        if name and name not in hostnames:
-            hostnames.append(name)
-
-    # -- Parse each <port> element ------------------------------------------
-    for port_elem in root.iter("port"):
-        try:
-            port_id = int(port_elem.get("portid", "0"))
-        except (ValueError, TypeError):
+    # -- Parse each <host> element ------------------------------------------
+    for host_elem in root.iter("host"):
+        # Skip hosts that are explicitly "down" — but do NOT skip when
+        # status is missing or has an unknown value.  With -Pn nmap may
+        # report the host status as unknown or omit it entirely while
+        # still providing port/service data.
+        status = host_elem.find("status")
+        if status is not None and status.get("state") == "down":
             continue
 
-        proto = port_elem.get("protocol", "tcp")
-        state_elem = port_elem.find("state")
-        state = state_elem.get("state", "unknown") if state_elem is not None else "unknown"
+        # Determine hostname from <hostnames> element
+        hostname: str | None = None
+        hostnames_elem = host_elem.find("hostnames")
+        if hostnames_elem is not None:
+            for hname in hostnames_elem.findall("hostname"):
+                name = hname.get("name", "").strip()
+                if name:
+                    hostname = name
+                    if name not in hostnames:
+                        hostnames.append(name)
+                    break
 
-        # Only care about open / open|filtered ports
-        if state not in ("open", "open|filtered"):
+        # Also extract hostnames from http-title script output
+        http_title_hostnames: list[str] = []
+
+        ports_elem = host_elem.find("ports")
+        if ports_elem is None:
             continue
 
-        svc_elem = port_elem.find("service")
-        service_name = svc_elem.get("name", "unknown") if svc_elem is not None else "unknown"
-        product = svc_elem.get("product", "") if svc_elem is not None else ""
-        version = svc_elem.get("version", "") if svc_elem is not None else ""
-        extra_info = svc_elem.get("extrainfo", "") if svc_elem is not None else ""
+        for port_elem in ports_elem.findall("port"):
+            try:
+                port_id = int(port_elem.get("portid", "0"))
+            except (ValueError, TypeError):
+                continue
 
-        # -- Parse <script> children ----------------------------------------
-        scripts: dict[str, str] = {}
-        for script_elem in port_elem.findall("script"):
-            script_id = script_elem.get("id", "")
-            script_output = script_elem.get("output", "")
-            if script_id:
-                scripts[script_id] = script_output
+            proto = port_elem.get("protocol", "tcp")
+            state_elem = port_elem.find("state")
+            state = state_elem.get("state", "unknown") if state_elem is not None else "unknown"
 
-            # Extract hostname from http-title script
-            if script_id == "http-title" and script_output:
-                title = script_output.strip()
-                if title and title not in hostnames:
-                    hostnames.append(title)
+            # Only care about open / open|filtered ports
+            if state not in ("open", "open|filtered"):
+                continue
 
-        info = ServiceInfo(
-            port=port_id,
-            proto=proto,
-            state=state,
-            service=service_name,
-            product=product,
-            version=version,
-            extra_info=extra_info,
-            scripts=scripts,
-        )
-        services[port_id] = info
+            svc_elem = port_elem.find("service")
+            service_name = svc_elem.get("name", "unknown") if svc_elem is not None else "unknown"
+            product = svc_elem.get("product", "") if svc_elem is not None else ""
+            version = svc_elem.get("version", "") if svc_elem is not None else ""
+            extra_info = svc_elem.get("extrainfo", "") if svc_elem is not None else ""
+
+            # -- Parse <script> children ------------------------------------
+            scripts: dict[str, str] = {}
+            for script_elem in port_elem.findall("script"):
+                script_id = script_elem.get("id", "")
+                script_output = script_elem.get("output", "")
+                if script_id:
+                    scripts[script_id] = script_output
+
+                # Extract hostname from http-title script
+                if script_id == "http-title" and script_output:
+                    title = script_output.strip()
+                    if title and "." in title and not title.replace(".", "").isdigit():
+                        if title not in hostnames:
+                            http_title_hostnames.append(title)
+
+            # Use the first http-title hostname as fallback if no <hostname> found
+            port_hostname = hostname
+            if not port_hostname and http_title_hostnames:
+                port_hostname = http_title_hostnames[0]
+
+            info = ServiceInfo(
+                port=port_id,
+                proto=proto,
+                state=state,
+                service=service_name,
+                product=product,
+                version=version,
+                extra_info=extra_info,
+                scripts=scripts,
+                hostname=port_hostname,
+            )
+            services[port_id] = info
+
+        # Also register any http-title hostnames that weren't the primary
+        for hname in http_title_hostnames:
+            if hname not in hostnames:
+                hostnames.append(hname)
 
     return services, hostnames
 

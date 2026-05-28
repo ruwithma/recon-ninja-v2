@@ -756,6 +756,24 @@ def display_scan_summary(state: ScanState) -> None:
     if state.detected_techs:
         display_tech_stack(state.detected_techs)
 
+    # --- Discovered paths & vhosts (CTF-critical!) ---
+    dirfuzz_findings = [
+        f for f in state.all_findings
+        if f.module == "web_dirfuzz"
+        and (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
+    ]
+    vhost_findings = [
+        f for f in state.all_findings
+        if f.module == "web_dirfuzz" and f.title.startswith("Vhost found:")
+    ]
+    if dirfuzz_findings or vhost_findings:
+        display_discovered_paths(dirfuzz_findings, vhost_findings)
+
+    # --- Exploit results ---
+    exploit_findings = [f for f in state.all_findings if f.module == "vuln_correlate"]
+    if exploit_findings:
+        display_exploit_results(exploit_findings)
+
     # --- Findings ---
     display_findings_panel(state.all_findings)
 
@@ -988,26 +1006,35 @@ def display_discovered_paths(
         import re as _re
         for f in dirfuzz_findings:
             # Try to extract structured info from the finding
-            # Titles like "Fuzz: /admin [200] [1234b]" or "Path found: /api"
+            # Titles like "Fuzz: /admin (HTTP 200, 1234B)" or "Path found: /.git/ (HTTP 200)"
+            # or older format "Fuzz: /admin [200] [1234b]"
             path = ""
             status_code = ""
             size = ""
             title = f.title
 
-            # Extract path
-            path_match = _re.search(r"(?:Fuzz|Path found):\s*(\S+)", title)
+            # Extract path — stop before parenthesis or bracket
+            path_match = _re.search(r"(?:Fuzz|Path found):\s*(\S+?)(?:\s*[(\[])", title)
             if path_match:
                 path = path_match.group(1)
+            else:
+                # Fallback: grab path without the trailing metadata
+                path_match2 = _re.search(r"(?:Fuzz|Path found):\s*(\S+)", title)
+                if path_match2:
+                    path = path_match2.group(1)
 
-            # Extract status code
-            status_match = _re.search(r"\[(\d{3})\]", title)
+            # Extract status code — supports both (HTTP 200, ...) and [200]
+            status_match = _re.search(r"(?:HTTP\s+|Status:\s+)?(\d{3})", title)
             if status_match:
                 status_code = status_match.group(1)
 
-            # Extract size — look for patterns like [1234b] or [1234 bytes]
-            # but NOT [200] (which is the status code)
+            # Extract size — supports (HTTP 200, 1234B), [1234b], Size: 1234
             size = ""
-            size_match = _re.search(r"\[(\d+)\s*b(?:ytes)?\]", title, _re.IGNORECASE)
+            size_match = _re.search(r"[,(\[]\s*(\d+)\s*B\b", title, _re.IGNORECASE)
+            if not size_match:
+                size_match = _re.search(r"Size:\s*(\d+)", title, _re.IGNORECASE)
+            if not size_match:
+                size_match = _re.search(r"\[(\d+)\s*b(?:ytes)?\]", title, _re.IGNORECASE)
             if size_match:
                 size = size_match.group(1)
 
@@ -1076,13 +1103,15 @@ def display_discovered_paths(
         import re as _re2
         for f in vhost_findings:
             title = f.title
-            # "Vhost found: models.smarthire.htb [401]"
+            # "Vhost found: models.smarthire.htb Status: 401 Size: 1234"
+            # or "Vhost found: models.smarthire.htb (HTTP 401, 1234B)"
             vhost = ""
             status_code = ""
             vhost_match = _re2.search(r"Vhost found:\s*(\S+)", title)
             if vhost_match:
                 vhost = vhost_match.group(1)
-            status_match = _re2.search(r"\[(\d{3})\]", title)
+            # Extract status — supports both (HTTP 401) and Status: 401
+            status_match = _re2.search(r"(?:HTTP\s+|Status:\s+)(\d{3})", title)
             if status_match:
                 status_code = status_match.group(1)
 
