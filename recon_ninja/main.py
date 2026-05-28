@@ -681,8 +681,15 @@ def scan_cmd(
     try:
         final_state = asyncio.run(engine.run())
     except KeyboardInterrupt:
-        console.print("\n[bold yellow][!][/] [yellow]Scan interrupted by user. State saved for --resume.[/yellow]")
+        console.print(
+            "\n[bold yellow][!][/] [yellow]Scan interrupted"
+            " by user. State saved for --resume.[/yellow]"
+        )
         state.save()
+        if not quiet and state.all_findings:
+            from recon_ninja.core.display import display_findings_panel
+            console.print("\n[bold]Findings collected so far:[/bold]")
+            display_findings_panel(state.all_findings)
         raise typer.Exit(code=130)
     except Exception as exc:
         err_console.print(f"[bold red]Scan failed:[/bold red] {exc}")

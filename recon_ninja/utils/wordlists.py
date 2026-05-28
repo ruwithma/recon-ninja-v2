@@ -179,12 +179,16 @@ def get_dir_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path 
     return _resolve_first(_DIR_WORDLIST_CANDIDATES, seclists_base, custom_dir)
 
 
-def get_dir_small_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
+def get_dir_small_wordlist(
+    seclists_base: str, custom_dir: str | None = None,
+) -> Path | None:
     """Return a small directory brute-force wordlist from SecLists.
 
     Priority order:
-      1. ``common.txt``
-      2. ``raft-medium-directories-lowercase.txt``
+      1. ``raft-small-directories-lowercase.txt`` (~32 entries)
+      2. ``raft-small-directories.txt`` (~32 entries)
+      3. ``common.txt`` (~4614 entries)
+      4. ``raft-medium-directories-lowercase.txt`` (~26K entries)
 
     Parameters
     ----------
@@ -199,6 +203,8 @@ def get_dir_small_wordlist(seclists_base: str, custom_dir: str | None = None) ->
         Path to the first available directory wordlist, or ``None``.
     """
     candidates = [
+        "Discovery/Web-Content/raft-small-directories-lowercase.txt",
+        "Discovery/Web-Content/raft-small-directories.txt",
         "Discovery/Web-Content/common.txt",
         "Discovery/Web-Content/raft-medium-directories-lowercase.txt",
         "Discovery/Web-Content/raft-medium-directories.txt",

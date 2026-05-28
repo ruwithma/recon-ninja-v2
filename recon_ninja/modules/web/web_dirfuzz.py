@@ -473,66 +473,103 @@ async def run_web_dirfuzz(  # noqa: C901
     if shutil.which("feroxbuster"):
         ferox_out = output_dir / "feroxbuster.txt"
 
-        # Pre-flight connectivity check — skip feroxbuster if target is
-        # unreachable (e.g. filtered ports on HTB) to avoid wasting the
-        # entire timeout budget on a dead target.
+        # Pre-flight connectivity check with response-time measurement.
+        # Skip feroxbuster if target is unreachable (e.g. filtered ports
+        # on HTB) and adapt parameters for slow targets.
         _preflight_rc, _preflight_out, _ = await run_tool(
             cmd=[
-                "curl", "-sI", "-o", "/dev/null", "-w", "%{http_code}",
+                "curl", "-sI", "-o", "/dev/null",
+                "-w", "%{http_code} %{time_total}",
                 "--connect-timeout", "5", "--max-time", "10", url,
             ],
             timeout=15,
         )
+        preflight_parts = _preflight_out.strip().split()
         target_reachable = (
             _preflight_rc == 0
-            and _preflight_out.strip()
-            and _preflight_out.strip() != "000"
+            and preflight_parts
+            and preflight_parts[0] not in ("", "000")
         )
+
+        # Measure response time for adaptive tuning
+        response_time = 0.0
+        if len(preflight_parts) >= 2:
+            try:
+                response_time = float(preflight_parts[1])
+            except ValueError:
+                pass
+
+        # For slow targets, reduce extensions and threads to avoid
+        # spending 800+ seconds on a wordlist × extension explosion.
+        ferox_extensions = extensions
+        ferox_threads = threads
+        if target_reachable and response_time > 3.0:
+            logger.warning(
+                "[web_dirfuzz] Target %s is slow (%.1fs/response)"
+                " — reducing extensions and threads",
+                url, response_time,
+            )
+            # Keep only the most essential extensions
+            ferox_extensions = "php,html,txt"
+            ferox_threads = "10"
 
         if not target_reachable:
             logger.warning(
-                "[web_dirfuzz] Target %s appears unreachable — skipping feroxbuster",
+                "[web_dirfuzz] Target %s appears unreachable"
+                " — skipping feroxbuster",
                 url,
             )
-            raw_parts.append("=== feroxbuster (Stage 1) === SKIPPED (target unreachable)")
+            raw_parts.append(
+                "=== feroxbuster (Stage 1) === SKIPPED (target unreachable)"
+            )
         else:
             ferox_cmd = [
                 "feroxbuster",
                 "-u", url,
                 "-w", stage1_wl,
-                "-x", extensions,
-                "-t", threads,
-                "--timeout", "7",
-                "--connect-timeout", "5",
+                "-x", ferox_extensions,
+                "-t", ferox_threads,
+                "--timeout", "4",
+                "--connect-timeout", "3",
                 "-q",  # quiet mode
             ]
-            # Only add --scan-limit when scanning multiple URLs; on a single
-            # target (typical CTF scenario) it adds unnecessary overhead.
-            ferox_cmd.extend(["--filter-code", "403,429,502,503"])
+            ferox_cmd.extend(
+                ["--filter-code", "403,429,502,503"]
+            )
             if use_adaptive:
                 ferox_cmd.append("--no-recursion")
             else:
                 ferox_cmd.extend(["--depth", depth])
 
-            # Give feroxbuster 1.5× the default timeout — directory fuzzing
-            # is inherently slower than single-command tools.
+            # Give feroxbuster 1.5× the default timeout — directory
+            # fuzzing is inherently slower than single-command tools.
             ferox_timeout = int(config.default_timeout * 1.5)
             rc, stdout, stderr = await run_tool(
                 cmd=ferox_cmd,
                 output_file=ferox_out,
                 timeout=ferox_timeout,
             )
-            raw_parts.append(f"=== feroxbuster (Stage 1) ===\n{stdout[:5000]}")
+            raw_parts.append(
+                f"=== feroxbuster (Stage 1) ===\n{stdout[:5000]}"
+            )
 
             if rc in (0, 1) and stdout.strip():
-                for status, found_url, size in _parse_feroxbuster(stdout):
+                for status, found_url, size in _parse_feroxbuster(
+                    stdout,
+                ):
                     path = found_url.replace(url, "") or "/"
                     sev = _severity_for_status(status, path)
                     stage1_findings.append(
                         Finding(
                             severity=sev,
-                            title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                            description=f"Discovered path on {url}: {found_url}",
+                            title=(
+                                f"Fuzz: {path}"
+                                f" (HTTP {status}, {size}B)"
+                            ),
+                            description=(
+                                f"Discovered path on {url}:"
+                                f" {found_url}"
+                            ),
                             module="web_dirfuzz",
                             evidence=f"HTTP {status} Size:{size}",
                         )

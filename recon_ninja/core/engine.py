@@ -290,7 +290,7 @@ class ReconEngine:
                 console = get_console()
                 console.print("  [dim]Using RustScan for fast port discovery...[/]")
             top_ports = "1000" if self.config.fast_mode else "10000"
-            
+
             # Dynamically calculate ulimit and batch size to prevent OS permission/resource errors
             import resource
             try:
@@ -306,7 +306,7 @@ class ReconEngine:
                 "-u", str(ulimit_val),
                 "--scripts", "none",
             ]
-            
+
             if ulimit_val < 4500:
                 batch_size = max(100, ulimit_val - 100)
                 cmd.extend(["-b", str(batch_size)])
@@ -590,6 +590,12 @@ class ReconEngine:
 
             for finding in result.findings:
                 self.state.add_finding(finding)
+
+        # Show a quick findings summary after Phase 3 so the user gets
+        # immediate feedback without waiting for Phases 4-7 to complete.
+        if not self.quiet and self.state.all_findings:
+            from recon_ninja.core.display import display_findings_panel
+            display_findings_panel(self.state.all_findings)
 
         logger.info(
             "Phase 3 complete: %d module results, %d total findings",
