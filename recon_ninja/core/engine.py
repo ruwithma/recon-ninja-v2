@@ -78,9 +78,12 @@ def parse_nmap_xml(xml_path: Path) -> dict[int, ServiceInfo]:
     root = tree.getroot()
 
     for host_elem in root.iter("host"):
-        # Skip hosts that are not "up"
+        # Skip hosts that are explicitly "down" — but do NOT skip when
+        # status is missing or has an unknown value.  With -Pn nmap may
+        # report the host status as unknown or omit it entirely while
+        # still providing port/service data.
         status = host_elem.find("status")
-        if status is not None and status.get("state") != "up":
+        if status is not None and status.get("state") == "down":
             continue
 
         # Determine hostname
@@ -467,6 +470,10 @@ class ReconEngine:
             services = parse_nmap_xml(xml_out)
             self.state.services.update(services)
             logger.info("Parsed %d services from deep scan XML", len(services))
+
+            # Supplement product/version from nmap script output when
+            # nmap -sV couldn't determine them (common for filtered ports).
+            self._supplement_scripts(services)
         else:
             logger.warning("XML output file not found after deep scan")
 
@@ -496,9 +503,6 @@ class ReconEngine:
                                 self.target, svc.hostname,
                             )
                             if not self.quiet:
-                                from recon_ninja.core.display import (
-                                    get_console,
-                                )
                                 get_console().print(
                                     f"  [bold green][+][/] Auto-added"
                                     f" [bold cyan]{svc.hostname}[/]"
@@ -525,7 +529,6 @@ class ReconEngine:
                                 self.target, hname,
                             )
                             if not self.quiet:
-                                from recon_ninja.core.display import get_console
                                 get_console().print(
                                     f"  [bold green][+][/] Auto-added"
                                     f" [bold cyan]{hname}[/]"
@@ -668,18 +671,42 @@ class ReconEngine:
             from recon_ninja.core.display import display_findings_panel
             display_findings_panel(self.state.all_findings)
 
+        # Display discovered paths and vhosts prominently before the
+        # findings panel collapses them into INFO summary.
+        if not self.quiet:
+            from recon_ninja.core.display import display_discovered_paths
+            dirfuzz_findings = []
+            vhost_findings = []
+            for result in module_results:
+                if not isinstance(result, ModuleResult):
+                    continue
+                for f in result.findings:
+                    if f.module == "web_dirfuzz":
+                        if f.title.startswith("Vhost found:"):
+                            vhost_findings.append(f)
+                        elif f.title.startswith("Fuzz:") or f.title.startswith("Path found:"):
+                            dirfuzz_findings.append(f)
+            if dirfuzz_findings or vhost_findings:
+                display_discovered_paths(dirfuzz_findings, vhost_findings)
+
         # Re-display the port table with tech-enriched data now that
         # Phase 3 has run technology detection.  When nmap -sV fails to
         # detect product/version (shows "—"), the tech data from
         # Wappalyzer/headers supplements the table.
         if not self.quiet and self.state.detected_techs:
-            from recon_ninja.core.display import get_console
             console = get_console()
             console.print()
             console.print(
                 "  [bold cyan][*][/] Updated service info with detected technologies:"
             )
             display_port_table(self.state.services, techs=self.state.detected_techs)
+
+        # Phase 3.5: Recursively scan discovered vhosts for technologies.
+        # Vhosts found by web_dirfuzz may have different tech stacks from
+        # the primary host.  The web module already does in-scan vhost
+        # tech detection, but this catches vhosts discovered through other
+        # channels (OSINT, DNS) or ensures complete coverage.
+        await self._scan_vhost_techs()
 
         logger.info(
             "Phase 3 complete: %d module results, %d total findings",
@@ -1005,6 +1032,13 @@ class ReconEngine:
                     for f in findings:
                         f.module = "vuln_correlate"
                         self.state.add_finding(f)
+
+        # Display exploit results prominently
+        if not self.quiet:
+            exploit_findings = [f for f in self.state.all_findings if f.module == "vuln_correlate"]
+            if exploit_findings:
+                from recon_ninja.core.display import display_exploit_results
+                display_exploit_results(exploit_findings)
 
     @staticmethod
     def _parse_searchsploit_json(stdout: str, name: str) -> list[str]:
@@ -1523,6 +1557,152 @@ class ReconEngine:
             return "LINUX_SERVER"
 
         return "UNKNOWN"
+
+    # ------------------------------------------------------------------
+    # Script-based service supplementation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _supplement_scripts(services: dict[int, ServiceInfo]) -> None:
+        """Fill in missing product/version from nmap script output.
+
+        When nmap -sV can't probe deeply enough (filtered ports), the
+        script output often contains useful version information that we
+        can extract.
+        """
+        import re as _re
+
+        for svc in services.values():
+            if not isinstance(svc, ServiceInfo):
+                continue
+            # http-server-header → e.g. "nginx/1.18.0 (Ubuntu)"
+            if "http-server-header" in svc.scripts and not svc.product:
+                header = svc.scripts["http-server-header"].strip()
+                # Parse "nginx/1.18.0 (Ubuntu)" or "Apache/2.4.52"
+                match = _re.match(r"(\w+)[/\s]*(\S+)?", header)
+                if match:
+                    svc.product = match.group(1)
+                    ver = match.group(2)
+                    if ver and not svc.version:
+                        svc.version = ver.strip("()")
+
+            # ssh-hostkey → indicates OpenSSH
+            if "ssh-hostkey" in svc.scripts and not svc.product:
+                output = svc.scripts["ssh-hostkey"].lower()
+                if "ssh" in output:
+                    # Try to extract version from the key output
+                    ver_match = _re.search(r"ssh[- ](\d+[\.\d]*)", output)
+                    if ver_match:
+                        svc.product = "OpenSSH"
+                        svc.version = ver_match.group(1)
+                    else:
+                        svc.product = "OpenSSH"
+
+    # ------------------------------------------------------------------
+    # Vhost tech scanning (Phase 3.5)
+    # ------------------------------------------------------------------
+
+    async def _scan_vhost_techs(self) -> None:
+        """Scan discovered vhosts for technologies.
+
+        Checks ``state.hostnames`` for hostnames that differ from the
+        primary hostname and runs web_tech against them.  This ensures
+        that vhosts discovered by dirfuzz or other modules are fully
+        profiled even if the in-scan vhost detection missed some.
+        """
+        primary = self.state.primary_hostname
+        web_ports = self.state.web_ports
+        if not web_ports or not self.state.hostnames:
+            return
+
+        # Identify vhosts we haven't scanned yet — a vhost is considered
+        # "already scanned" if we have detected techs for it on any port.
+        scanned_vhost_techs: set[str] = set()
+        for tech in self.state.detected_techs:
+            # tech names associated with non-primary hostnames indicate
+            # those vhosts have been scanned
+            pass  # We check differently below
+
+        # Actually, check which hostnames appear in evidence/description
+        # of existing techs.  Simpler: just track which vhost:port combos
+        # we've already scanned by looking at existing tech entries.
+        existing_tech_names = {(t.name, t.port) for t in self.state.detected_techs}
+
+        new_vhosts = [
+            h for h in self.state.hostnames
+            if h != primary and h != self.target
+        ]
+
+        if not new_vhosts:
+            return
+
+        logger.info("Scanning %d vhost(s) for technologies: %s", len(new_vhosts), new_vhosts)
+
+        if not self.quiet:
+            console = get_console()
+            console.print()
+            console.print(
+                "  [bold cyan][*][/] Scanning discovered vhosts for technologies..."
+            )
+
+        try:
+            from recon_ninja.modules.web.web_tech import run_web_tech
+        except ImportError:
+            logger.debug("web_tech module not available — skipping vhost tech scan")
+            return
+
+        for vhost in new_vhosts:
+            for port in web_ports:
+                svc = self.state.services.get(port)
+                if svc is None:
+                    continue
+                scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
+                vhost_url = f"{scheme}://{vhost}:{port}"
+
+                # Skip if we already have tech results for this vhost on this port
+                # (the web module may have already scanned it)
+                vhost_port_dir = self.output_dir / f"port_{port}_{vhost}"
+                tech_marker = vhost_port_dir / "web_tech_done.txt"
+                if tech_marker.exists():
+                    continue
+
+                logger.info("[vhost_tech] Scanning %s on port %d", vhost, port)
+
+                try:
+                    vhost_port_dir.mkdir(parents=True, exist_ok=True)
+                    result = await run_web_tech(
+                        target=self.target,
+                        port=port,
+                        url=vhost_url,
+                        state=self.state,
+                        config=self.config,
+                        output_dir=vhost_port_dir,
+                    )
+
+                    # Mark as done to avoid re-scanning
+                    tech_marker.write_text("done", encoding="utf-8")
+
+                    # Add any new findings
+                    for finding in result.findings:
+                        self.state.add_finding(finding)
+
+                    # Report new techs discovered on the vhost
+                    if not self.quiet and result.findings:
+                        new_techs = [
+                            t for t in self.state.detected_techs
+                            if t.port == port
+                            and (t.name, port) not in existing_tech_names
+                        ]
+                        if new_techs:
+                            for t in new_techs:
+                                ver_tag = f" {t.version}" if t.version else ""
+                                console.print(
+                                    f"    [bold green][+][/] [bold]{vhost}[/]:"
+                                    f" {t.name}{ver_tag} [{t.category}]"
+                                )
+
+                except Exception as exc:
+                    logger.debug("[vhost_tech] Failed for %s:%d: %s", vhost, port, exc)
 
     # ------------------------------------------------------------------
     # Parsing helpers

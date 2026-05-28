@@ -959,3 +959,208 @@ def live_scan_display(modules: list[str]) -> Live:
         refresh_per_second=4,
         vertical_overflow="visible",
     )
+
+
+# ---------------------------------------------------------------------------
+# Discovered paths & vhosts display
+# ---------------------------------------------------------------------------
+
+
+def display_discovered_paths(
+    dirfuzz_findings: list[Finding],
+    vhost_findings: list[Finding],
+) -> None:
+    """Display discovered directories and vhosts from web_dirfuzz.
+
+    Parameters
+    ----------
+    dirfuzz_findings:
+        Findings whose titles start with "Fuzz:" or "Path found:".
+    vhost_findings:
+        Findings whose titles start with "Vhost found:".
+    """
+    console = get_console()
+
+    # --- Directory / path findings ---
+    if dirfuzz_findings:
+        # Group by port — extract port from description or evidence
+        port_paths: dict[str, list[tuple[str, str, str]]] = {}  # port → [(path, status, size)]
+        import re as _re
+        for f in dirfuzz_findings:
+            # Try to extract structured info from the finding
+            # Titles like "Fuzz: /admin [200] [1234b]" or "Path found: /api"
+            path = ""
+            status_code = ""
+            size = ""
+            title = f.title
+
+            # Extract path
+            path_match = _re.search(r"(?:Fuzz|Path found):\s*(\S+)", title)
+            if path_match:
+                path = path_match.group(1)
+
+            # Extract status code
+            status_match = _re.search(r"\[(\d{3})\]", title)
+            if status_match:
+                status_code = status_match.group(1)
+
+            # Extract size — look for patterns like [1234b] or [1234 bytes]
+            # but NOT [200] (which is the status code)
+            size = ""
+            size_match = _re.search(r"\[(\d+)\s*b(?:ytes)?\]", title, _re.IGNORECASE)
+            if size_match:
+                size = size_match.group(1)
+
+            # Try to extract port from description (URL patterns)
+            port = "—"
+            port_match = _re.search(r":(\d{1,5})/", f.description or "")
+            if port_match:
+                port = port_match.group(1)
+            elif f.evidence:
+                port_match2 = _re.search(r":(\d{1,5})/", f.evidence)
+                if port_match2:
+                    port = port_match2.group(1)
+
+            port_paths.setdefault(port, []).append((path or title, status_code, size))
+
+        for port, paths in sorted(port_paths.items()):
+            table = Table(
+                title=f"[bold bright_green] Discovered Paths — Port {port} [/]",
+                show_header=True,
+                header_style="bold white",
+                border_style="green",
+                title_style="bold bright_green",
+            )
+            table.add_column("Status", width=6, justify="center")
+            table.add_column("Path", style="bold", min_width=20)
+            table.add_column("Size", width=10, justify="right")
+
+            # Sort: status 2xx first, then 3xx, then others
+            def _sort_key(item: tuple[str, str, str]) -> str:
+                code = item[1]
+                if code.startswith("2"):
+                    return f"0{code}"
+                elif code.startswith("3"):
+                    return f"1{code}"
+                return f"2{code}"
+
+            for p, sc, sz in sorted(paths, key=_sort_key):
+                if sc.startswith("2"):
+                    sc_display = f"[bold green]{sc}[/]"
+                elif sc.startswith("3"):
+                    sc_display = f"[bold cyan]{sc}[/]"
+                elif sc.startswith("4"):
+                    sc_display = f"[yellow]{sc}[/]"
+                elif sc.startswith("5"):
+                    sc_display = f"[red]{sc}[/]"
+                else:
+                    sc_display = sc or "—"
+                table.add_row(sc_display, p, sz or "—")
+
+            console.print(table)
+            console.print()
+
+    # --- Vhost findings ---
+    if vhost_findings:
+        table = Table(
+            title="[bold bright_magenta] Discovered Vhosts [/]",
+            show_header=True,
+            header_style="bold white",
+            border_style="magenta",
+            title_style="bold bright_magenta",
+        )
+        table.add_column("Vhost", style="bold", min_width=20)
+        table.add_column("Status", width=8, justify="center")
+        table.add_column("Detail", min_width=20)
+
+        import re as _re2
+        for f in vhost_findings:
+            title = f.title
+            # "Vhost found: models.smarthire.htb [401]"
+            vhost = ""
+            status_code = ""
+            vhost_match = _re2.search(r"Vhost found:\s*(\S+)", title)
+            if vhost_match:
+                vhost = vhost_match.group(1)
+            status_match = _re2.search(r"\[(\d{3})\]", title)
+            if status_match:
+                status_code = status_match.group(1)
+
+            if status_code.startswith("2"):
+                sc_display = f"[bold green]{status_code}[/]"
+            elif status_code.startswith("3"):
+                sc_display = f"[bold cyan]{status_code}[/]"
+            elif status_code.startswith("4"):
+                sc_display = f"[yellow]{status_code}[/]"
+            else:
+                sc_display = status_code or "—"
+
+            detail = f.description[:80] if f.description else ""
+            table.add_row(vhost or title, sc_display, detail)
+
+        console.print(table)
+        console.print()
+
+
+# ---------------------------------------------------------------------------
+# Exploit results display
+# ---------------------------------------------------------------------------
+
+
+def display_exploit_results(findings: list[Finding]) -> None:
+    """Display searchsploit/exploit findings in a clear table.
+
+    Parameters
+    ----------
+    findings:
+        Findings from the vuln_correlate module.
+    """
+    if not findings:
+        return
+
+    console = get_console()
+
+    table = Table(
+        title="[bold bright_red] EXPLOIT RESULTS [/]",
+        show_header=True,
+        header_style="bold white",
+        border_style="red",
+        title_style="bold bright_red",
+    )
+    table.add_column("Query", style="bold", min_width=16)
+    table.add_column("Count", justify="right", width=6)
+    table.add_column("Top Exploits", min_width=40)
+
+    import re as _re
+    for f in findings:
+        # Parse: "Exploits found: searchsploit-22 (3 results)"
+        # or: "Exploits (broad): Nginx (5 results)"
+        title = f.title
+        count_match = _re.search(r"\((\d+)\s+results?\)", title)
+        count = count_match.group(1) if count_match else "?"
+
+        # Extract query from description
+        query = ""
+        q_match = _re.search(r"for\s+'([^']+)'", f.description or "")
+        if q_match:
+            query = q_match.group(1)
+        elif "broad" in title.lower():
+            broad_match = _re.search(r"broad\):\s*(\S+)", title)
+            if broad_match:
+                query = broad_match.group(1)
+
+        # Get top exploits from description
+        top = ""
+        top_match = _re.search(r"Top results?:\s*(.+)", f.description or "")
+        if top_match:
+            top = top_match.group(1)[:100]
+
+        sev_style = f.severity.rich_style if hasattr(f.severity, "rich_style") else "white"
+        table.add_row(
+            query or title[:40],
+            f"[{sev_style}]{count}[/]",
+            top or f.description[:80] if f.description else "—",
+        )
+
+    console.print(table)
+    console.print()
