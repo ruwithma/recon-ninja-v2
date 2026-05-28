@@ -836,7 +836,8 @@ class ReconEngine:
 
             nuclei_cmd.extend([
                 "-severity", "critical,high,medium",
-                "-exclude-tags", "fuzz,headless,dos",
+                "-tags", "cve,exposure,misconfig",
+                "-exclude-tags", "fuzz,headless,dos,misc,tokens",
                 "-jsonl", "-o", str(self.output_dir / "nuclei.txt"),
             ])
             if self.config.nuclei_templates:

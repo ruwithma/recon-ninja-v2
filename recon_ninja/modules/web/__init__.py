@@ -10,6 +10,10 @@ the appropriate URL, and then runs the sub-modules:
 slow vulnerability scanners (nikto, nuclei).  This ensures the CTF player
 gets actionable paths and subdomains quickly, while the longer vuln scans
 continue in the background.
+
+**Priority output**: Fast results (dirs, vhosts, tech) are printed
+IMMEDIATELY as they are found, so CTF players can start working
+while slow vuln scans continue in the background.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from recon_ninja.modules.web.web_dirfuzz import run_web_dirfuzz
 from recon_ninja.modules.web.web_vuln import run_web_vuln
 from recon_ninja.modules.web.web_cms import run_web_cms
 from recon_ninja.core.utils import module_guard
+from recon_ninja.core.display import get_console
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,25 @@ def _rebuild_url_with_hostname(url: str, hostname: str, port: int) -> str:
     """Replace the host component of a URL while preserving suffixes."""
     parts = urlsplit(url)
     return urlunsplit((parts.scheme, f"{hostname}:{port}", parts.path, parts.query, parts.fragment))
+
+
+def _print_fast_findings(findings: list[Finding], port: int, category: str) -> None:
+    """Print actionable findings immediately so CTF players can start working.
+
+    Only prints findings that are MEDIUM severity or above — INFO findings
+    are deferred to the final report to avoid terminal noise.
+    """
+    console = get_console()
+    # Only show actionable findings (not INFO-level noise)
+    actionable = [f for f in findings if f.severity != Severity.INFO]
+    for f in actionable:
+        sev_style = f.severity.rich_style
+        console.print(
+            f"      [{sev_style}]•[/] {f.title}"
+        )
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -90,10 +114,17 @@ async def _scan_port(
     host_suffix = f"_{hostname}" if (hostname and hostname != target) else ""
     port_dir = output_dir / f"port_{port}{host_suffix}"
     port_dir.mkdir(parents=True, exist_ok=True)
+    console = get_console()
+
+    # ================================================================
+    # FAST PHASE — Core + Tech + DirFuzz (results printed immediately)
+    # CTF players need these FIRST: headers, tech, directories, vhosts
+    # ================================================================
 
     # Step 1 — Core fingerprinting (must run first — fetches headers,
     # hostnames, security headers, WAF detection)
     logger.info("[web:%d] Running web_core …", port)
+    console.print(f"    [dim]▸[/] Fingerprinting web server on port {port}…")
     core_result = await run_web_core(target, port, url, state, config, port_dir)
     results.append(core_result)
 
@@ -109,21 +140,30 @@ async def _scan_port(
         hostname = refreshed_hostname
         url = _rebuild_url_with_hostname(url, hostname, port)
 
+    # Print core findings immediately
+    _print_fast_findings(core_result.findings, port, "fingerprint")
+
     # Step 2 — Deep technology detection (needs headers from web_core)
     logger.info("[web:%d] Running web_tech …", port)
+    console.print(f"    [dim]▸[/] Detecting technologies on port {port}…")
     tech_result = await run_web_tech(target, port, url, state, config, port_dir)
     results.append(tech_result)
 
-    # Step 3 — Directory fuzzing + vhost enum (CTF-critical, run FIRST)
+    # Print tech findings immediately (especially vulnerable tech!)
+    _print_fast_findings(tech_result.findings, port, "tech")
+
+    # Step 3 — Directory fuzzing + vhost enum (CTF-critical!)
     # This gives the CTF player actionable directories and subdomains
     # quickly, before slow vuln scanners like nikto/nuclei run.
     logger.info("[web:%d] Running web_dirfuzz (fast results first) …", port)
+    console.print(f"    [dim]▸[/] Fuzzing directories & vhosts on port {port}…")
     dirfuzz_result = await run_web_dirfuzz(
         target, port, url, hostname, state, config, port_dir,
     )
     results.append(dirfuzz_result)
 
-    # Print quick results so the CTF player can start working immediately
+    # Print directory and vhost findings immediately — these are the
+    # MOST VALUABLE results for CTF players
     dir_findings = [
         f for f in dirfuzz_result.findings
         if f.title.startswith("Fuzz:") or f.title.startswith("Path found:")
@@ -133,30 +173,50 @@ async def _scan_port(
         if f.title.startswith("Vhost found:")
     ]
     if dir_findings or vhost_findings:
-        from recon_ninja.core.display import get_console
-        console = get_console()
+        console.print(
+            f"    [bold green][+][/] Fast scan done on port {port}!"
+        )
         if dir_findings:
             console.print(
                 f"    [bold green][+][/] Found "
-                f"[bold cyan]{len(dir_findings)}[/] directories/files "
-                f"on port {port}"
+                f"[bold cyan]{len(dir_findings)}[/] directories/files"
             )
-            # Show top 5 most interesting dirs
             sorted_dirs = sorted(dir_findings, key=lambda f: f.severity.rank)
-            for f in sorted_dirs[:8]:
-                console.print(f"      [dim]•[/] {f.title}")
+            for f in sorted_dirs[:10]:
+                sev_style = f.severity.rich_style
+                console.print(
+                    f"      [{sev_style}]•[/] {f.title}"
+                )
         if vhost_findings:
             console.print(
                 f"    [bold green][+][/] Found "
-                f"[bold cyan]{len(vhost_findings)}[/] vhosts "
-                f"on port {port}"
+                f"[bold cyan]{len(vhost_findings)}[/] vhosts"
             )
             for f in vhost_findings[:5]:
-                console.print(f"      [dim]•[/] {f.title}")
+                console.print(
+                    f"      [bold yellow]•[/] {f.title}"
+                )
+    else:
+        console.print(
+            f"    [dim][-] No directories or vhosts found on port {port}[/]"
+        )
 
-    # Steps 4-5 — Slow vuln scanners run AFTER dirs (concurrent)
+    # Print a clear separator so CTF players know they can start working
+    console.print(
+        "    [bold bright_green]⚡ Fast results complete!"
+        " Deep vuln scans continuing in background…[/]"
+    )
+
+    # ================================================================
+    # SLOW PHASE — Nikto + Nuclei + CMS (concurrent, less urgent)
+    # These run in parallel but CTF players already have what they need
+    # ================================================================
     logger.info(
         "[web:%d] Running web_vuln + web_cms concurrently …", port,
+    )
+    console.print(
+        f"    [dim]▸[/] Running deep vuln scanners on port {port}"
+        f" (nikto, nuclei, cms)…"
     )
 
     async def _safe_run(name: str, coro):
@@ -268,8 +328,11 @@ async def run_web_module(
             scanned_hosts = set()
             all_port_results = []
 
-            while hosts_to_scan:
-                current_host = hosts_to_scan.pop(0)
+            # Only scan the primary host/IP — do NOT re-scan vhosts
+            # discovered during scanning.  Vhosts are already reported as
+            # findings and auto-added to /etc/hosts by web_dirfuzz.
+            # Re-scanning them wastes time and causes duplicate output.
+            for current_host in hosts_to_scan:
                 if current_host.lower() in scanned_hosts:
                     continue
 
@@ -292,12 +355,6 @@ async def run_web_module(
                         output_dir=output_dir,
                     )
                     all_port_results.extend(port_results)
-
-                    # Dynamic host discovery: add newly discovered hosts to queue
-                    for host in state.hostnames:
-                        if host.lower() not in scanned_hosts and host not in hosts_to_scan:
-                            logger.info("[web:%d] Queueing newly discovered host: %s", port, host)
-                            hosts_to_scan.append(host)
 
                 except Exception as exc:
                     logger.exception(

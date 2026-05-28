@@ -353,7 +353,12 @@ class TestNiktoMetadataFiltering:
 
 class TestRecursiveVhostScanQueue:
     @pytest.mark.asyncio
-    async def test_scans_dynamically_discovered_vhost(self, tmp_path: Path) -> None:
+    async def test_dynamically_discovered_vhost_registered_but_not_rescanned(self, tmp_path: Path) -> None:
+        """Vhosts discovered during dirfuzz are registered in state but NOT
+        re-scanned through the full web pipeline.  This prevents duplicate
+        output and long delays — the vhost is already reported as a finding
+        and auto-added to /etc/hosts by web_dirfuzz.
+        """
         state = _make_web_state(tmp_path)
         config = ReconConfig()
 
@@ -389,9 +394,10 @@ class TestRecursiveVhostScanQueue:
             result = await run_web_module("10.129.7.81", state, config, tmp_path)
 
         assert result.status == "done"
-        # It should have scanned the initial target IP, then processed
-        # the newly discovered vhost from the queue
-        assert scanned_hosts == ["10.129.7.81", "models.smarthire.htb"]
+        # The vhost is registered in state but NOT re-scanned
+        assert "models.smarthire.htb" in state.hostnames
+        # Only the primary target IP should be scanned through the pipeline
+        assert scanned_hosts == ["10.129.7.81"]
 
 
 class TestFeroxbusterCommandGen:

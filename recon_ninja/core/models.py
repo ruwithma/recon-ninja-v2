@@ -320,10 +320,76 @@ class ScanState:
         return cls(**data)
 
     def add_finding(self, finding: Finding) -> None:
-        """Add a finding, preventing duplicates by title+module."""
-        existing_titles = {(f.title, f.module) for f in self.all_findings}
-        if (finding.title, finding.module) not in existing_titles:
-            self.all_findings.append(finding)
+        """Add a finding, preventing duplicates.
+
+        Deduplication strategy:
+        1. Exact match on (title, module) — same finding from same module
+        2. Cross-module dedup for known-duplicate patterns only:
+           - Missing security headers (reported by web_core, nikto, nuclei)
+           - WAF detection (reported by web_core and nuclei)
+           - Server banners (reported by multiple tools)
+        """
+        # Exact dedup
+        for existing in self.all_findings:
+            if existing.title == finding.title and existing.module == finding.module:
+                return
+
+        # Cross-module dedup: only for known duplicate patterns that
+        # flood the output.  We check for specific keywords rather than
+        # doing generic fuzzy matching (which is too aggressive).
+        import re as _re
+
+        # Patterns that are commonly duplicated across modules
+        _DUP_PATTERNS = [
+            r"missing\s+\d+\s+security\s+headers",
+            r"missing\s+security\s+header",
+            r"content-security-policy",
+            r"strict-transport-security",
+            r"x-frame-options",
+            r"x-content-type-options",
+            r"referrer-policy",
+            r"permissions-policy",
+            r"waf\s+detected",
+            r"server\s+banner",
+        ]
+
+        finding_lower = finding.title.lower()
+        is_dup_candidate = any(
+            _re.search(pat, finding_lower) for pat in _DUP_PATTERNS
+        )
+
+        if is_dup_candidate:
+            # Normalize for comparison
+            finding_norm = _re.sub(
+                r"https?://[^\s/]+", "", finding_lower,
+            )
+            finding_norm = _re.sub(r"[^a-z0-9]", "", finding_norm)
+            # Remove module-specific prefixes
+            for prefix in ("nikto", "nuclei", "webcore", "webvuln",
+                           "webdirfuzz", "webtech"):
+                finding_norm = finding_norm.replace(prefix, "")
+
+            for existing in self.all_findings:
+                existing_lower = existing.title.lower()
+                existing_norm = _re.sub(
+                    r"https?://[^\s/]+", "", existing_lower,
+                )
+                existing_norm = _re.sub(r"[^a-z0-9]", "", existing_norm)
+                for prefix in ("nikto", "nuclei", "webcore", "webvuln",
+                               "webdirfuzz", "webtech"):
+                    existing_norm = existing_norm.replace(prefix, "")
+
+                if finding_norm and existing_norm:
+                    # If one is a substring of the other, it's a dup
+                    if (finding_norm in existing_norm
+                            or existing_norm in finding_norm):
+                        # Keep the one with higher severity
+                        if finding.severity.rank < existing.severity.rank:
+                            existing.severity = finding.severity
+                            existing.description = finding.description
+                        return
+
+        self.all_findings.append(finding)
 
     def add_tech(self, tech: TechInfo) -> None:
         """Add a detected technology, preventing duplicates by name+version+port."""

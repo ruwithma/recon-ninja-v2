@@ -41,10 +41,13 @@ NIKTO_TIMEOUT = 180
 NUCLEI_TIMEOUT = 300
 
 #: Nuclei tags to target — CTF-focused, skip info-level noise.
-NUCLEI_TAGS = "cve,exposure"
+NUCLEI_TAGS = "cve,exposure,misconfig"
+
+#: Nuclei severity levels to scan — skip INFO (noise for CTF players).
+NUCLEI_SEVERITY = "critical,high,medium,low"
 
 #: Nuclei templates to EXCLUDE — these generate noise, not signal.
-NUCLEI_EXCLUDE_TAGS = "fuzz,headless,dos"
+NUCLEI_EXCLUDE_TAGS = "fuzz,headless,dos,misc,tokens"
 
 #: Nikto line patterns to suppress (duplicated by web_core or noise).
 NIKTO_NOISE_PATTERNS = [
@@ -332,7 +335,7 @@ async def run_web_vuln(
             "nuclei",
             "-u", url,
             "-o", str(nuclei_out),
-            "-severity", "critical,high,medium,low",
+            "-severity", NUCLEI_SEVERITY,
             "-tags", NUCLEI_TAGS,
             "-exclude-tags", NUCLEI_EXCLUDE_TAGS,
             "-silent",

@@ -365,38 +365,55 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
 
     Automatically adds to /etc/hosts when running as root (typical CTF
     usage) or when ``--htb`` / ``--add-hosts`` flags are set.
+    Prints a clear, prominent message so CTF players see it immediately.
     """
     vhost = vhost.split(":")[0].strip()  # Strip port if present
     if not vhost or vhost.replace(".", "").isdigit():
         return
-    if vhost not in state.hostnames:
-        state.add_hostname(vhost)
-        auto_add = (
-            config.module_toggles.get("_add_hosts", False)
-            or config.module_toggles.get("_htb", False)
-        )
-        # Auto-add when running as root — typical CTF usage via sudo
-        if not auto_add:
-            from recon_ninja.utils.network import is_root
-            auto_add = is_root()
 
-        from recon_ninja.utils.hosts import (
-            add_to_hosts,
-            get_ip_for_hostname,
+    is_new = vhost not in state.hostnames
+    if is_new:
+        state.add_hostname(vhost)
+
+    auto_add = (
+        config.module_toggles.get("_add_hosts", False)
+        or config.module_toggles.get("_htb", False)
+    )
+    # Auto-add when running as root — typical CTF usage via sudo
+    if not auto_add:
+        from recon_ninja.utils.network import is_root
+        auto_add = is_root()
+
+    from recon_ninja.utils.hosts import (
+        add_to_hosts,
+        get_ip_for_hostname,
+    )
+    already_mapped = get_ip_for_hostname(vhost) == target
+
+    if auto_add and not already_mapped:
+        if add_to_hosts(target, vhost):
+            logger.info(
+                "[web_dirfuzz] Automatically added/updated"
+                " %s -> %s in /etc/hosts",
+                target, vhost,
+            )
+            from recon_ninja.core.display import get_console
+            get_console().print(
+                f"    [bold green][+][/] Auto-added "
+                f"[bold cyan]{vhost}[/] -> {target} "
+                f"in /etc/hosts"
+            )
+    elif not already_mapped:
+        # Not auto-added — print a clear hint for the user
+        from recon_ninja.core.display import get_console
+        get_console().print(
+            f"    [bold yellow][!][/] Vhost [bold cyan]{vhost}[/]"
+            f" found but not in /etc/hosts"
         )
-        if auto_add and get_ip_for_hostname(vhost) != target:
-            if add_to_hosts(target, vhost):
-                logger.info(
-                    "[web_dirfuzz] Automatically added/updated"
-                    " %s -> %s in /etc/hosts",
-                    target, vhost,
-                )
-                from recon_ninja.core.display import get_console
-                get_console().print(
-                    f"    [bold green][+][/] Auto-added "
-                    f"[bold cyan]{vhost}[/] -> {target} "
-                    f"in /etc/hosts"
-                )
+        get_console().print(
+            f"        [dim]Add it:[/]"
+            f" [bold]echo \"{target} {vhost}\" | sudo tee -a /etc/hosts[/]"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -802,6 +819,8 @@ async def run_web_dirfuzz(  # noqa: C901
                 for line in stdout.splitlines():
                     if "Found:" in line or "Status:" in line:
                         vhost = None
+                        status_code = ""
+                        size = ""
                         m = re.search(r"Found:\s*([^\s:]+)", line)
                         if m:
                             vhost = m.group(1)
@@ -809,13 +828,35 @@ async def run_web_dirfuzz(  # noqa: C901
                             parts = line.split()
                             if parts:
                                 vhost = parts[0].split(":")[0]
+                        # Try to extract status and size
+                        status_match = re.search(r"Status:\s*(\d+)", line)
+                        if status_match:
+                            status_code = status_match.group(1)
+                        size_match = re.search(r"Size:\s*(\d+)", line)
+                        if size_match:
+                            size = size_match.group(1)
                         if vhost:
                             _register_vhost(vhost, target, state, config)
 
+                        # Build a clean finding title
+                        title_parts = [f"Vhost found: {vhost}"]
+                        if status_code:
+                            title_parts.append(f"Status: {status_code}")
+                        if size:
+                            title_parts.append(f"Size: {size}")
+                        clean_title = " ".join(title_parts)
+
+                        # 401 = auth required = very interesting for CTF
+                        vhost_sev = Severity.INFO
+                        if status_code == "401":
+                            vhost_sev = Severity.MEDIUM
+                        elif status_code == "200":
+                            vhost_sev = Severity.LOW
+
                         stage1_vhost_findings.append(
                             Finding(
-                                severity=Severity.INFO,
-                                title=f"Vhost found: {line.strip()}",
+                                severity=vhost_sev,
+                                title=clean_title,
                                 description=f"Virtual host discovered on {url}",
                                 module="web_dirfuzz",
                                 evidence=line.strip(),
@@ -910,6 +951,8 @@ async def run_web_dirfuzz(  # noqa: C901
                     for line in stdout2.splitlines():
                         if "Found:" in line or "Status:" in line:
                             vhost = None
+                            status_code = ""
+                            size = ""
                             m = re.search(r"Found:\s*([^\s:]+)", line)
                             if m:
                                 vhost = m.group(1)
@@ -917,13 +960,33 @@ async def run_web_dirfuzz(  # noqa: C901
                                 parts = line.split()
                                 if parts:
                                     vhost = parts[0].split(":")[0]
+                            # Try to extract status and size
+                            status_match = re.search(r"Status:\s*(\d+)", line)
+                            if status_match:
+                                status_code = status_match.group(1)
+                            size_match = re.search(r"Size:\s*(\d+)", line)
+                            if size_match:
+                                size = size_match.group(1)
                             if vhost:
                                 _register_vhost(vhost, target, state, config)
 
+                            title_parts = [f"Vhost found: {vhost}"]
+                            if status_code:
+                                title_parts.append(f"Status: {status_code}")
+                            if size:
+                                title_parts.append(f"Size: {size}")
+                            clean_title = " ".join(title_parts)
+
+                            vhost_sev = Severity.INFO
+                            if status_code == "401":
+                                vhost_sev = Severity.MEDIUM
+                            elif status_code == "200":
+                                vhost_sev = Severity.LOW
+
                             findings.append(
                                 Finding(
-                                    severity=Severity.INFO,
-                                    title=f"Vhost found: {line.strip()}",
+                                    severity=vhost_sev,
+                                    title=clean_title,
                                     description=f"Virtual host discovered on {url}",
                                     module="web_dirfuzz",
                                     evidence=line.strip(),
