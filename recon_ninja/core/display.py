@@ -12,6 +12,7 @@ Functions are split into two categories:
 from __future__ import annotations
 
 import logging
+import re
 
 from rich.align import Align
 from rich.console import Console
@@ -486,7 +487,23 @@ def display_findings_panel(findings: list[Finding]) -> None:
             f"    [bold]{finding.title}[/]{cve_tag} {module_tag}"
         )
         if desc and desc != finding.title:
-            lines.append(f"    [dim]{desc}[/]")
+            # Normalize title and description for redundancy comparison
+            title_norm = re.sub(r'https?://[^\s/]+', '', finding.title.lower())
+            title_norm = re.sub(r'[^a-z0-9]', '', title_norm)
+            
+            desc_norm = re.sub(r'https?://[^\s/]+', '', desc.lower())
+            desc_norm = re.sub(r'[^a-z0-9]', '', desc_norm)
+            
+            for word in ["nikto", "nuclei", "fuzz", "pathfound", "techdetected", "wafdetected", "findingon"]:
+                title_norm = title_norm.replace(word, "")
+                desc_norm = desc_norm.replace(word, "")
+                
+            is_redundant = False
+            if not title_norm or not desc_norm or title_norm in desc_norm or desc_norm in title_norm:
+                is_redundant = True
+                
+            if not is_redundant:
+                lines.append(f"    [dim]{desc}[/]")
 
     content = "\n".join(lines)
     panel = Panel(

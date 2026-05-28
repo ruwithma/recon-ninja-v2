@@ -329,6 +329,20 @@ async def _check_path(
         return None
 
 
+def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConfig) -> None:
+    """Register a newly discovered virtual host in state and /etc/hosts if enabled."""
+    vhost = vhost.split(":")[0].strip()  # Strip port if present
+    if not vhost or vhost.replace(".", "").isdigit():
+        return
+    if vhost not in state.hostnames:
+        state.hostnames.append(vhost)
+        auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
+        from recon_ninja.utils.hosts import hostname_exists, add_to_hosts
+        if auto_add and not hostname_exists(vhost):
+            if add_to_hosts(target, vhost):
+                logger.info("[web_dirfuzz] Automatically added %s -> %s to /etc/hosts", target, vhost)
+
+
 # ---------------------------------------------------------------------------
 # Main sub-module function
 # ---------------------------------------------------------------------------
@@ -445,7 +459,7 @@ async def run_web_dirfuzz(
                 "-w", stage1_wl,
                 "-x", extensions,
                 "-t", threads,
-                "--depth", depth,
+                "--depth", "1" if use_adaptive else depth,
                 "--scan-limit", "3",
                 "--timeout", "10",
                 "-q",  # quiet mode
@@ -581,7 +595,12 @@ async def run_web_dirfuzz(
     # 3. Vhost scan — if hostname is known
     # ------------------------------------------------------------------
     vhost_hostname = hostname or state.primary_hostname
-    if vhost_hostname:
+    # Only run vhost scanning on the primary hostname/domain, not on subdomains
+    is_subdomain_scan = False
+    if hostname and state.primary_hostname and hostname.lower() != state.primary_hostname.lower():
+        is_subdomain_scan = True
+
+    if vhost_hostname and not is_subdomain_scan:
         vhost_wordlist = str(config.dns_wordlist)
 
         # Smart adaptive vhost logic
@@ -630,6 +649,17 @@ async def run_web_dirfuzz(
             if stdout.strip():
                 for line in stdout.splitlines():
                     if "Found:" in line or "Status:" in line:
+                        vhost = None
+                        m = re.search(r"Found:\s*([^\s:]+)", line)
+                        if m:
+                            vhost = m.group(1)
+                        else:
+                            parts = line.split()
+                            if parts:
+                                vhost = parts[0].split(":")[0]
+                        if vhost:
+                            _register_vhost(vhost, target, state, config)
+
                         stage1_vhost_findings.append(
                             Finding(
                                 severity=Severity.INFO,
@@ -666,6 +696,7 @@ async def run_web_dirfuzz(
                         status_found = entry.get("status", 0)
                         size_found = entry.get("size", 0)
                         if vhost_found:
+                            _register_vhost(vhost_found, target, state, config)
                             stage1_vhost_findings.append(
                                 Finding(
                                     severity=Severity.INFO,
@@ -703,6 +734,17 @@ async def run_web_dirfuzz(
                 if stdout2.strip():
                     for line in stdout2.splitlines():
                         if "Found:" in line or "Status:" in line:
+                            vhost = None
+                            m = re.search(r"Found:\s*([^\s:]+)", line)
+                            if m:
+                                vhost = m.group(1)
+                            else:
+                                parts = line.split()
+                                if parts:
+                                    vhost = parts[0].split(":")[0]
+                            if vhost:
+                                _register_vhost(vhost, target, state, config)
+
                             findings.append(
                                 Finding(
                                     severity=Severity.INFO,
@@ -739,6 +781,7 @@ async def run_web_dirfuzz(
                             status_found = entry.get("status", 0)
                             size_found = entry.get("size", 0)
                             if vhost_found:
+                                _register_vhost(vhost_found, target, state, config)
                                 findings.append(
                                     Finding(
                                         severity=Severity.INFO,
@@ -753,7 +796,7 @@ async def run_web_dirfuzz(
         elif use_adaptive_vhost and not stage1_vhost_findings and not passive_subdomains_found:
             logger.info("[web_dirfuzz] Stage 1 found no active virtual hosts. Skipping Stage 2 to save time.")
     else:
-        logger.debug("No hostname known — skipping vhost scan")
+        logger.debug("No hostname known or subdomain scan — skipping vhost scan")
 
     # ------------------------------------------------------------------
     # Done

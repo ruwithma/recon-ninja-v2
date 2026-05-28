@@ -85,7 +85,8 @@ async def _scan_port(
         Results from each sub-module executed for this port.
     """
     results: list[ModuleResult] = []
-    port_dir = output_dir / f"port_{port}"
+    host_suffix = f"_{hostname}" if (hostname and hostname != target) else ""
+    port_dir = output_dir / f"port_{port}{host_suffix}"
     port_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1 — Core fingerprinting (must run first — fetches headers, hostnames)
@@ -198,47 +199,73 @@ async def run_web_module(
     port_semaphore = asyncio.Semaphore(2)
 
     async def _scan_port_bounded(port: int) -> tuple[int, list[ModuleResult]]:
-        """Scan a single port inside a semaphore."""
+        """Scan a single port inside a semaphore, including any dynamically discovered virtual hosts."""
         async with port_semaphore:
             svc = state.services.get(port)
             if svc is None:
                 logger.warning("No ServiceInfo for port %d — skipping", port)
                 return port, []
 
-            if svc.url:
-                url = svc.url.replace("TARGET", target)
-            else:
-                scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
-                host = svc.hostname or target
-                url = f"{scheme}://{host}:{port}"
+            scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
 
-            hostname = svc.hostname or state.primary_hostname
+            hosts_to_scan = []
+            if svc.hostname:
+                hosts_to_scan.append(svc.hostname)
+            if state.primary_hostname and state.primary_hostname not in hosts_to_scan:
+                hosts_to_scan.append(state.primary_hostname)
+            if not hosts_to_scan:
+                hosts_to_scan.append(target)
 
-            try:
-                port_results = await _scan_port(
-                    target=target,
-                    port=port,
-                    url=url,
-                    hostname=hostname,
-                    state=state,
-                    config=config,
-                    output_dir=output_dir,
-                )
-                return port, port_results
-            except Exception as exc:
-                logger.exception("[web:%d] Sub-module pipeline failed: %s", port, exc)
-                error_finding = Finding(
-                    severity=Severity.HIGH,
-                    title=f"Web scan pipeline failed on port {port}",
-                    description=str(exc),
-                    module="web",
-                )
-                return port, [ModuleResult(
-                    module_name="web",
-                    status="error",
-                    findings=[error_finding],
-                    error_message=str(exc),
-                )]
+            scanned_hosts = set()
+            all_port_results = []
+
+            while hosts_to_scan:
+                current_host = hosts_to_scan.pop(0)
+                if current_host.lower() in scanned_hosts:
+                    continue
+
+                logger.info("[web:%d] Starting web scan pipeline for host: %s", port, current_host)
+                scanned_hosts.add(current_host.lower())
+
+                if svc.url and "TARGET" in svc.url:
+                    url = svc.url.replace("TARGET", current_host)
+                else:
+                    url = f"{scheme}://{current_host}:{port}"
+
+                try:
+                    port_results = await _scan_port(
+                        target=target,
+                        port=port,
+                        url=url,
+                        hostname=current_host,
+                        state=state,
+                        config=config,
+                        output_dir=output_dir,
+                    )
+                    all_port_results.extend(port_results)
+
+                    # Dynamic host discovery: add newly discovered hosts to queue
+                    for host in state.hostnames:
+                        if host.lower() not in scanned_hosts and host not in hosts_to_scan:
+                            logger.info("[web:%d] Queueing newly discovered host: %s", port, host)
+                            hosts_to_scan.append(host)
+
+                except Exception as exc:
+                    logger.exception("[web:%d] Sub-module pipeline failed for %s: %s", port, current_host, exc)
+                    error_finding = Finding(
+                        severity=Severity.HIGH,
+                        title=f"Web scan pipeline failed on port {port} for {current_host}",
+                        description=str(exc),
+                        module="web",
+                    )
+                    all_port_results.append(ModuleResult(
+                        module_name="web",
+                        status="error",
+                        findings=[error_finding],
+                        error_message=str(exc),
+                    ))
+
+            return port, all_port_results
 
     port_tasks = [
         asyncio.create_task(_scan_port_bounded(port))

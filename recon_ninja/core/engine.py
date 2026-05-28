@@ -854,15 +854,7 @@ class ReconEngine:
                         )
                     )
                 else:
-                    self.state.add_finding(
-                        Finding(
-                            severity=Severity.INFO,
-                            title=f"searchsploit ran: {name} (no exploits found)",
-                            description="No exploits found in searchsploit database",
-                            evidence=stdout[:500],
-                            module="vuln_correlate",
-                        )
-                    )
+                    logger.info("searchsploit ran: %s (no exploits found)", name)
             if name == "nuclei":
                 content = ""
                 outfile = self.output_dir / "nuclei.txt"

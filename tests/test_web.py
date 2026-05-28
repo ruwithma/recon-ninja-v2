@@ -247,3 +247,70 @@ class TestAdaptiveWebFuzz:
         # It should run Stage 1, detect /dashboard, and run Stage 2
         assert mock_run.call_count == 2
         assert any("dashboard" in f.title for f in result.findings)
+
+
+class TestNiktoMetadataFiltering:
+    def test_filters_noise_lines(self) -> None:
+        from recon_ninja.modules.web.web_vuln import _parse_nikto_findings
+        
+        raw_nikto = (
+            "+ Target IP:          10.129.7.182\n"
+            "+ Target Hostname:    smarthire.htb\n"
+            "+ Target Port:        80\n"
+            "+ Start Time:         2026-05-28 11:21:12\n"
+            "+ Server: nginx/1.18.0 (Ubuntu)\n"
+            "+ No CGI Directories found\n"
+            "+ OSVDB-3092: /admin/: This might be interesting.\n"
+            "+ /config.php: PHP config file found."
+        )
+        findings = _parse_nikto_findings(raw_nikto, "http://smarthire.htb")
+        
+        titles = {f.title for f in findings}
+        # Metadata / banners should be filtered out
+        assert "Nikto [OSVDB-3092]: OSVDB-3092: /admin/: This might be interesting." in titles
+        assert "Nikto: /config.php: PHP config file found." in titles
+        assert not any("Target IP" in t for t in titles)
+        assert not any("Server" in t for t in titles)
+        assert not any("No CGI Directories" in t for t in titles)
+
+
+class TestRecursiveVhostScanQueue:
+    @pytest.mark.asyncio
+    async def test_scans_dynamically_discovered_vhost(self, tmp_path: Path) -> None:
+        state = _make_web_state(tmp_path)
+        config = ReconConfig()
+        
+        # Track which hosts are scanned
+        scanned_hosts = []
+
+        async def fake_run_web_core(target, port, url, state, config, output_dir):
+            return ModuleResult(module_name="web_core", status="done")
+
+        async def fake_run_web_tech(target, port, url, state, config, output_dir):
+            return ModuleResult(module_name="web_tech", status="done")
+
+        async def fake_run_web_dirfuzz(target, port, url, hostname, state, config, output_dir):
+            scanned_hosts.append(hostname)
+            # Simulate discovering a new virtual host on the first run
+            if hostname == "10.129.7.81":
+                state.hostnames.append("models.smarthire.htb")
+            return ModuleResult(module_name="web_dirfuzz", status="done")
+
+        async def fake_run_web_vuln(target, port, url, state, config, output_dir):
+            return ModuleResult(module_name="web_vuln", status="done")
+
+        async def fake_run_web_cms(target, port, url, state, config, output_dir):
+            return ModuleResult(module_name="web_cms", status="done")
+
+        with (
+            patch("recon_ninja.modules.web.run_web_core", side_effect=fake_run_web_core),
+            patch("recon_ninja.modules.web.run_web_tech", side_effect=fake_run_web_tech),
+            patch("recon_ninja.modules.web.run_web_dirfuzz", side_effect=fake_run_web_dirfuzz),
+            patch("recon_ninja.modules.web.run_web_vuln", side_effect=fake_run_web_vuln),
+            patch("recon_ninja.modules.web.run_web_cms", side_effect=fake_run_web_cms),
+        ):
+            result = await run_web_module("10.129.7.81", state, config, tmp_path)
+
+        assert result.status == "done"
+        # It should have scanned the initial target IP, then processed the newly discovered vhost from the queue
+        assert scanned_hosts == ["10.129.7.81", "models.smarthire.htb"]

@@ -85,6 +85,24 @@ def _parse_nikto_findings(raw: str, url: str) -> list[Finding]:
         if not content:
             continue
 
+        # Filter out metadata and noise
+        content_lower = content.lower()
+        metadata_prefixes = (
+            "target ip:",
+            "target hostname:",
+            "target port:",
+            "platform:",
+            "start time:",
+            "end time:",
+            "server:",
+            "scan terminated:",
+            "1 host(s) tested",
+            "no cgi directories found",
+            "target database:",
+        )
+        if any(content_lower.startswith(prefix) for prefix in metadata_prefixes):
+            continue
+
         # Check for CVE reference
         cve: str | None = None
         cve_match = re.search(r"CVE-\d{4}-\d{4,}", content)
