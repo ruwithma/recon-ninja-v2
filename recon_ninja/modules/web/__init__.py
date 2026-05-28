@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -38,6 +39,7 @@ from recon_ninja.modules.web.web_vuln import run_web_vuln
 from recon_ninja.modules.web.web_cms import run_web_cms
 from recon_ninja.core.utils import module_guard
 from recon_ninja.core.display import get_console
+from recon_ninja.core.runner import run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,172 @@ async def _scan_port(
             f"    [dim][-] No directories or vhosts found on port {port}[/]"
         )
 
+    # Print tech stack summary immediately so CTF players can act on it
+    port_techs = state.techs_by_port(port)
+    if port_techs:
+        console.print(
+            f"    [bold cyan][*][/] Tech stack on port {port}:"
+        )
+        for tech in port_techs:
+            vuln_tag = f" [bold red]({', '.join(tech.cves)})[/]" if tech.is_vulnerable else ""
+            ver_tag = f" {tech.version}" if tech.version else ""
+            console.print(
+                f"      [dim]•[/] [bold]{tech.name}[/]{ver_tag}"
+                f" [dim][{tech.category}][/]{vuln_tag}"
+            )
+
+    # Quick searchsploit on detected tech versions — CTF players need
+    # this BEFORE deep scans.  Run only for techs with versions.
+    _versioned_techs = [
+        t for t in port_techs if t.version and t.name
+    ]
+    if _versioned_techs and shutil.which("searchsploit"):
+        console.print(
+            f"    [bold magenta][*][/] Running quick exploit lookup on port {port}…"
+        )
+        for tech in _versioned_techs:
+            query = f"{tech.name} {tech.version}"
+            try:
+                rc, stdout, _stderr = await run_tool(
+                    cmd=["searchsploit", "--json", query],
+                    timeout=30,
+                )
+                if rc in (0, 1) and stdout.strip():
+                    import json as _json
+                    try:
+                        data = _json.loads(stdout)
+                        results_list = (
+                            data.get("RESULTS_EXPLOIT", [])
+                            or data.get("RESULTS_SEARCH", [])
+                            or data.get("results", [])
+                        )
+                        if results_list:
+                            console.print(
+                                f"      [bold yellow]⚔[/] [bold]{tech.name} {tech.version}[/]"
+                                f" — [bold cyan]{len(results_list)}[/] exploits found"
+                            )
+                            for entry in results_list[:5]:
+                                title = entry.get("Title", "") if isinstance(entry, dict) else str(entry)
+                                etype = entry.get("Type", "") if isinstance(entry, dict) else ""
+                                type_tag = f" [dim][{etype}][/]" if etype else ""
+                                if title:
+                                    console.print(
+                                        f"        [dim]•[/] {title}{type_tag}"
+                                    )
+                            # Add as finding so it appears in the final report
+                            state.add_finding(Finding(
+                                severity=Severity.MEDIUM,
+                                title=f"Exploits available: {tech.name} {tech.version} ({len(results_list)} found)",
+                                description=(
+                                    f"searchsploit found {len(results_list)} exploits for "
+                                    f"{tech.name} {tech.version}. "
+                                    f"Top: {', '.join(e.get('Title', '') if isinstance(e, dict) else str(e) for e in results_list[:5])}"
+                                ),
+                                module="web",
+                                evidence=f"searchsploit --json '{query}'",
+                                suggested_commands=[
+                                    f"searchsploit {tech.name} {tech.version}",
+                                ],
+                            ))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    # ================================================================
+    # VHOST SCANNING — Tech detect + quick searchsploit on discovered
+    # vhosts.  This is CRITICAL for CTF: subdomains often have
+    # different tech stacks and attack surfaces.
+    # ================================================================
+    if vhost_findings:
+        console.print(
+            f"    [bold cyan][*][/] Scanning discovered vhosts for tech & exploits…"
+        )
+        for vf in vhost_findings[:5]:
+            # Extract vhost hostname from the finding title
+            _vh_match = __import__("re").search(
+                r"Vhost found:\s*([^\s]+)", vf.title,
+            )
+            if not _vh_match:
+                continue
+            _vhost_name = _vh_match.group(1).split(":")[0]
+            _vhost_url = f"{urlsplit(url).scheme}://{_vhost_name}:{port}"
+
+            # Quick tech detection on the vhost
+            try:
+                _vhost_tech_result = await run_web_tech(
+                    target, port, _vhost_url, state, config, port_dir,
+                )
+                results.append(_vhost_tech_result)
+                # Print discovered techs immediately
+                _vhost_techs = [
+                    t for t in _vhost_tech_result.findings
+                    if t.title.startswith("Tech stack")
+                ]
+                _new_techs = state.techs_by_port(port)
+                _vhost_specific = [
+                    t for t in _new_techs
+                    if t.name not in {_ot.name for _ot in port_techs}
+                ]
+                if _vhost_specific:
+                    console.print(
+                        f"      [bold cyan]▸[/] Tech on [bold]{_vhost_name}[/]:"
+                    )
+                    for t in _vhost_specific:
+                        ver_tag = f" {t.version}" if t.version else ""
+                        vuln_tag = f" [bold red]({', '.join(t.cves)})[/]" if t.is_vulnerable else ""
+                        console.print(
+                            f"        [dim]•[/] [bold]{t.name}[/]{ver_tag}"
+                            f" [dim][{t.category}][/]{vuln_tag}"
+                        )
+                    # Quick searchsploit on vhost tech
+                    _vh_versioned = [t for t in _vhost_specific if t.version and t.name]
+                    if _vh_versioned and shutil.which("searchsploit"):
+                        for t in _vh_versioned:
+                            try:
+                                rc, stdout, _ = await run_tool(
+                                    cmd=["searchsploit", "--json", f"{t.name} {t.version}"],
+                                    timeout=30,
+                                )
+                                if rc in (0, 1) and stdout.strip():
+                                    import json as _json
+                                    try:
+                                        data = _json.loads(stdout)
+                                        rlist = (
+                                            data.get("RESULTS_EXPLOIT", [])
+                                            or data.get("RESULTS_SEARCH", [])
+                                            or data.get("results", [])
+                                        )
+                                        if rlist:
+                                            console.print(
+                                                f"        [bold yellow]⚔[/] {t.name} {t.version}"
+                                                f" — [bold cyan]{len(rlist)}[/] exploits"
+                                            )
+                                            for e in rlist[:3]:
+                                                et = e.get("Title", "") if isinstance(e, dict) else str(e)
+                                                if et:
+                                                    console.print(f"          [dim]•[/] {et}")
+                                            state.add_finding(Finding(
+                                                severity=Severity.MEDIUM,
+                                                title=f"Exploits: {t.name} {t.version} on {_vhost_name} ({len(rlist)} found)",
+                                                description=(
+                                                    f"searchsploit found {len(rlist)} exploits for "
+                                                    f"{t.name} {t.version} on vhost {_vhost_name}. "
+                                                    f"Top: {', '.join(e.get('Title', '') if isinstance(e, dict) else str(e) for e in rlist[:5])}"
+                                                ),
+                                                module="web",
+                                                evidence=f"searchsploit --json '{t.name} {t.version}'",
+                                                suggested_commands=[
+                                                    f"searchsploit {t.name} {t.version}",
+                                                ],
+                                            ))
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+            except Exception as exc:
+                logger.debug("[web:%d] Vhost tech scan failed for %s: %s", port, _vhost_name, exc)
+
     # Print a clear separator so CTF players know they can start working
     console.print(
         "    [bold bright_green]⚡ Fast results complete!"
@@ -328,10 +496,9 @@ async def run_web_module(
             scanned_hosts = set()
             all_port_results = []
 
-            # Only scan the primary host/IP — do NOT re-scan vhosts
-            # discovered during scanning.  Vhosts are already reported as
-            # findings and auto-added to /etc/hosts by web_dirfuzz.
-            # Re-scanning them wastes time and causes duplicate output.
+            # Scan the primary host/IP.  Vhosts discovered during
+            # scanning will be scanned separately in _scan_port after
+            # dirfuzz finds them (tech detection + quick searchsploit).
             for current_host in hosts_to_scan:
                 if current_host.lower() in scanned_hosts:
                     continue

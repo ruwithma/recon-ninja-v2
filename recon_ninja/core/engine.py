@@ -93,6 +93,11 @@ def parse_nmap_xml(xml_path: Path) -> dict[int, ServiceInfo]:
                     hostname = name
                     break
 
+        # Also extract hostnames from http-title script output
+        # This catches hostnames that nmap only reports in script output
+        # (common on HTB/CTF machines where DNS isn't set up)
+        http_title_hostnames: list[str] = []
+
         ports_elem = host_elem.find("ports")
         if ports_elem is None:
             continue
@@ -115,6 +120,17 @@ def parse_nmap_xml(xml_path: Path) -> dict[int, ServiceInfo]:
                 sid = script_elem.get("id", "unknown")
                 soutput = script_elem.get("output", "")
                 scripts[sid] = soutput
+                # Extract hostname from http-title script
+                if sid == "http-title" and soutput:
+                    title = soutput.strip()
+                    # Only use as hostname if it looks like a domain
+                    if title and "." in title and not title.replace(".", "").isdigit():
+                        http_title_hostnames.append(title)
+
+            # Use the first http-title hostname as fallback if no <hostname> found
+            port_hostname = hostname
+            if not port_hostname and http_title_hostnames:
+                port_hostname = http_title_hostnames[0]
 
             services[port_id] = ServiceInfo(
                 port=port_id,
@@ -125,8 +141,16 @@ def parse_nmap_xml(xml_path: Path) -> dict[int, ServiceInfo]:
                 version=version,
                 extra_info=extra_info,
                 scripts=scripts,
-                hostname=hostname,
+                hostname=port_hostname,
             )
+
+        # Store any extra http-title hostnames for the caller to process
+        if http_title_hostnames and not hostname:
+            # Attach extra hostnames as a side channel via a special
+            # key on the services dict — the engine's phase2_deep_scan
+            # will pick these up
+            for hname in http_title_hostnames:
+                services.setdefault("__extra_hostnames__", []).append(hname)  # type: ignore[assignment]
 
     return services
 
@@ -478,6 +502,33 @@ class ReconEngine:
                                     f"  [bold green][+][/] Auto-added"
                                     f" [bold cyan]{svc.hostname}[/]"
                                     f" to /etc/hosts"
+                                )
+
+        # Also pick up hostnames extracted from http-title script output
+        extra_hostnames = self.state.services.pop("__extra_hostnames__", None)  # type: ignore[arg-type]
+        if extra_hostnames:
+            for hname in extra_hostnames:
+                if hname and hname not in self.state.hostnames:
+                    self.state.add_hostname(hname)
+                    auto_add = (
+                        self.config.module_toggles.get("_add_hosts", False)
+                        or self.config.module_toggles.get("_htb", False)
+                    )
+                    if not auto_add:
+                        auto_add = is_root()
+                    from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
+                    if auto_add and get_ip_for_hostname(hname) != self.target:
+                        if add_to_hosts(self.target, hname):
+                            logger.info(
+                                "Auto-updated %s -> %s in /etc/hosts (http-title)",
+                                self.target, hname,
+                            )
+                            if not self.quiet:
+                                from recon_ninja.core.display import get_console
+                                get_console().print(
+                                    f"  [bold green][+][/] Auto-added"
+                                    f" [bold cyan]{hname}[/]"
+                                    f" to /etc/hosts (from http-title)"
                                 )
 
         # Classify the box
@@ -871,10 +922,11 @@ class ReconEngine:
                 if exploits_found:
                     self.state.add_finding(
                         Finding(
-                            severity=Severity.INFO,
+                            severity=Severity.MEDIUM,
                             title=f"Exploits found: {name} ({len(exploits_found)} results)",
                             description=(
-                                f"searchsploit found {len(exploits_found)} potential exploits. "
+                                f"searchsploit found {len(exploits_found)} potential exploits"
+                                f" for '{query}'. "
                                 f"Top results: {', '.join(exploits_found[:5])}"
                             ),
                             evidence=stdout[:2000],
@@ -885,6 +937,42 @@ class ReconEngine:
                         )
                     )
                 else:
+                    # No results for specific query — try broad fallback
+                    # e.g. "Nginx 1.18.0" → try "Nginx"
+                    if query and " " in query.strip():
+                        broad_query = query.strip().split()[0]
+                        # Only try if the broad query is different from the specific
+                        if broad_query.lower() != query.lower() and shutil.which("searchsploit"):
+                            broad_name = f"{name}-broad"
+                            broad_outfile = self.output_dir / f"searchsploit_{name}_broad.txt"
+                            try:
+                                brc, bstdout, bstderr = await run_tool(
+                                    cmd=["searchsploit", "--json", broad_query],
+                                    output_file=broad_outfile,
+                                    timeout=self.config.default_timeout,
+                                )
+                                if brc in (0, 1) and bstdout.strip():
+                                    broad_exploits = self._parse_searchsploit_json(bstdout, broad_name)
+                                    if broad_exploits:
+                                        self.state.add_finding(
+                                            Finding(
+                                                severity=Severity.INFO,
+                                                title=f"Exploits (broad): {broad_query} ({len(broad_exploits)} results)",
+                                                description=(
+                                                    f"No exploits found for '{query}', but"
+                                                    f" {len(broad_exploits)} found for broader"
+                                                    f" query '{broad_query}'. "
+                                                    f"Top: {', '.join(broad_exploits[:5])}"
+                                                ),
+                                                evidence=bstdout[:2000],
+                                                module="vuln_correlate",
+                                                suggested_commands=[
+                                                    f"searchsploit {broad_query}",
+                                                ],
+                                            )
+                                        )
+                            except Exception:
+                                logger.debug("Broad searchsploit fallback failed for %s", broad_query)
                     logger.info("searchsploit ran: %s (no exploits found)", name)
             if name == "nuclei":
                 content = ""

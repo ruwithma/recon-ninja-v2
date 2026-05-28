@@ -269,13 +269,18 @@ def display_phase_header(phase_num: int, phase_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def display_port_table(services: dict[int, ServiceInfo]) -> None:
+def display_port_table(services: dict[int, ServiceInfo], techs: list | None = None) -> None:
     """Display the open-ports table after Phase 2 (service enumeration).
+
+    When nmap fails to detect product/version (shows "—"), supplements
+    with tech detected by Wappalyzer/headers if available.
 
     Parameters
     ----------
     services:
         Mapping of port number → :class:`ServiceInfo`.
+    techs:
+        Optional list of :class:`TechInfo` to supplement product/version.
     """
     if not services:
         get_console().print("[dim]No open ports discovered.[/]")
@@ -296,17 +301,41 @@ def display_port_table(services: dict[int, ServiceInfo]) -> None:
     table.add_column("PRODUCT", min_width=20)
     table.add_column("VERSION", min_width=14)
 
+    # Build a port → tech map for supplementing missing product/version
+    port_tech_map: dict[int, list] = {}
+    if techs:
+        from recon_ninja.core.models import TechInfo
+        for t in techs:
+            port_tech_map.setdefault(t.port, []).append(t)
+
     for port in sorted(services):
         svc = services[port]
         style = _service_style(svc.service)
         state_icon = "[green]open[/]" if svc.state == "open" else f"[yellow]{svc.state}[/]"
+
+        product_display = svc.product or "—"
+        version_display = svc.version or "—"
+
+        # If nmap didn't detect product/version, supplement with Wappalyzer
+        if product_display == "—" and port in port_tech_map:
+            server_techs = [t for t in port_tech_map[port] if t.category in ("server", "language")]
+            if server_techs:
+                product_display = server_techs[0].name
+                version_display = server_techs[0].version or "—"
+        elif version_display == "—" and port in port_tech_map and svc.product:
+            # nmap detected product but not version — check if tech has version
+            for t in port_tech_map[port]:
+                if t.name.lower() in svc.product.lower() and t.version:
+                    version_display = t.version
+                    break
+
         table.add_row(
             str(port),
             svc.proto,
             state_icon,
             f"[{style}]{svc.service}[/]",
-            svc.product or "—",
-            svc.version or "—",
+            product_display,
+            version_display,
         )
 
     console.print(table)
@@ -718,7 +747,7 @@ def display_scan_summary(state: ScanState) -> None:
     console.print()
 
     # --- Ports & services ---
-    display_port_table(state.services)
+    display_port_table(state.services, techs=state.detected_techs)
 
     # --- Box profile ---
     display_box_profile(state.box_profile)
