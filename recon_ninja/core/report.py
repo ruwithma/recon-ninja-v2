@@ -988,8 +988,15 @@ def _deduplicated_commands(findings: list[Finding], limit: int = 10) -> list[str
 def _generate_attack_paths(state: ScanState) -> list[str]:
     """Generate context-aware attack path suggestions based on the scan state.
 
-    This uses the detected services, tech stack, and box profile to suggest
-    concrete attack commands that a pentester/CTF player can copy-paste.
+    This uses the detected services, tech stack, vhost findings, and box
+    profile to suggest concrete attack commands that a pentester/CTF player
+    can copy-paste.  Attack paths are prioritized by:
+
+    1. Vulnerable technologies (highest priority — known CVEs)
+    2. Vhost authentication findings (401 = potential admin panels)
+    3. Service-specific attacks (SSH, SMB, FTP, etc.)
+    4. Tech-specific web attacks (CMS, framework, server)
+    5. General enumeration commands
 
     Parameters
     ----------
@@ -1003,11 +1010,10 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
     """
     commands: list[str] = []
     target = state.target
+    hostname = state.primary_hostname or target
     port_set = set(state.open_ports)
     services = state.services
     techs = state.detected_techs
-
-    # Build tech lookup for attack path generation
 
     # --- Vulnerable techs (highest priority) ---
     vulnerable = state.vulnerable_techs()
@@ -1018,9 +1024,34 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
             f"searchsploit {vtech.name} {vtech.version}"
         )
 
+    # --- Vhost findings (high CTF value — often lead to foothold) ---
+    vhost_findings = [f for f in state.all_findings if "Vhost" in f.title and "auth" not in f.title.lower()]
+    vhost_auth_findings = [f for f in state.all_findings if "vhost auth" in f.title.lower()]
+    if vhost_findings or vhost_auth_findings:
+        commands.append("# --- Virtual Hosts (high-value CTF targets) ---")
+        for vf in vhost_findings[:5]:
+            # Extract vhost name
+            import re as _re
+            _vh_match = _re.search(r"Vhost found:\s*([^\s]+)", vf.title)
+            if _vh_match:
+                _vhost = _vh_match.group(1).split(":")[0]
+                commands.append(f"curl -s http://{_vhost}  # Probe vhost content")
+        for vf in vhost_auth_findings[:3]:
+            # Extract vhost name from auth findings
+            _vh_match = _re.search(r"Vhost auth required:\s*([^\s(]+)", vf.title)
+            if _vh_match:
+                _vhost = _vh_match.group(1).strip()
+                commands.append(f"# [!] {_vhost} requires auth — try credential brute-forcing")
+                commands.append(f"hydra -L users.txt -P /usr/share/wordlists/rockyou.txt http://{_vhost} http-get")
+
     # --- SSH ---
     if 22 in port_set or any("ssh" in s.service.lower() for s in services.values()):
-        commands.append(f"ssh {target}  # Try default creds: root:root, admin:admin")
+        # Check if we know the SSH version from tech detection
+        ssh_tech = next((t for t in techs if "openssh" in t.name.lower() or "ssh" in t.name.lower()), None)
+        if ssh_tech and ssh_tech.version:
+            commands.append(f"# SSH: {ssh_tech.name} {ssh_tech.version} on port 22")
+            commands.append(f"searchsploit {ssh_tech.name} {ssh_tech.version}")
+        commands.append(f"ssh {hostname}  # Try default creds: root:root, admin:admin")
         commands.append(f"hydra -l root -P /usr/share/wordlists/rockyou.txt ssh://{target}")
 
     # --- Web ---
@@ -1037,7 +1068,7 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
             web_ports.append(p)
     for wp in web_ports:
         scheme = "https" if wp in (443, 8443, 4443) else "http"
-        url = f"{scheme}://{target}:{wp}"
+        url = f"{scheme}://{hostname}:{wp}"
         commands.append(f"nmap -p{wp} --script http-enum,http-headers,http-methods,http-vuln* {target}")
         commands.append(f"nikto -h {url}")
         commands.append(f"feroxbuster -u {url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt")
@@ -1102,16 +1133,17 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
                 commands.append(f"mongosh mongodb://{target}")
 
     # --- Tech-specific attack paths ---
-    _KNOWN_WEB_PORTS = {
-        80, 443, 8080, 8443,
-        3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
-        8888, 9000, 9090, 4443,
-    }
     for wp in web_ports:
         scheme = "https" if wp in (443, 8443, 4443) else "http"
-        url = f"{scheme}://{target}:{wp}"
+        url = f"{scheme}://{hostname}:{wp}"
 
         port_techs = [t for t in techs if t.port == wp]
+
+        # Detect server tech (Nginx, Apache, etc.) for targeted commands
+        server_techs = [t for t in port_techs if t.category == "server"]
+        for st in server_techs:
+            if st.version:
+                commands.append(f"searchsploit {st.name} {st.version}")
 
         # WordPress
         if any(t.name.lower() == "wordpress" for t in port_techs):
@@ -1146,6 +1178,18 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
         # Spring Boot
         if any("spring" in t.name.lower() for t in port_techs):
             commands.append(f"curl {url}/actuator/env  # Spring Boot actuator")
+
+        # Nginx
+        if any(t.name.lower() == "nginx" for t in port_techs):
+            nginx_t = next((t for t in port_techs if t.name.lower() == "nginx"), None)
+            if nginx_t and nginx_t.version:
+                commands.append(f"# Nginx {nginx_t.version} — check for path traversal, misconfigurations")
+
+        # Apache
+        if any(t.name.lower() in ("apache", "apache httpd", "apache http server") for t in port_techs):
+            apache_t = next((t for t in port_techs if "apache" in t.name.lower()), None)
+            if apache_t and apache_t.version:
+                commands.append(f"# Apache {apache_t.version} — check for path traversal (CVE-2021-41773, CVE-2021-42013)")
 
         break  # One set of tech-specific commands per web port group
 

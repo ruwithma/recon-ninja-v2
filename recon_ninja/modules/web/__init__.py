@@ -53,16 +53,28 @@ def _rebuild_url_with_hostname(url: str, hostname: str, port: int) -> str:
 def _print_fast_findings(findings: list[Finding], port: int, category: str) -> None:
     """Print actionable findings immediately so CTF players can start working.
 
-    Only prints findings that are MEDIUM severity or above — INFO findings
-    are deferred to the final report to avoid terminal noise.
+    Shows MEDIUM severity and above inline, plus a count summary for
+    directory and path findings (which are typically LOW/INFO but critical
+    for CTF players to see).
     """
     console = get_console()
-    # Only show actionable findings (not INFO-level noise)
+    # Show actionable findings (not INFO-level noise)
     actionable = [f for f in findings if f.severity != Severity.INFO]
     for f in actionable:
         sev_style = f.severity.rich_style
         console.print(
             f"      [{sev_style}]•[/] {f.title}"
+        )
+    # Also show directory/path findings even if they're LOW severity
+    # — these are CRITICAL for CTF players
+    dir_findings = [
+        f for f in findings
+        if f.title.startswith("Fuzz:") or f.title.startswith("Path found:")
+        and f.severity == Severity.LOW
+    ]
+    for f in dir_findings[:10]:
+        console.print(
+            f"      [dim]•[/] {f.title}"
         )
 
 
@@ -228,6 +240,7 @@ async def _scan_port(
         )
         for tech in _versioned_techs:
             query = f"{tech.name} {tech.version}"
+            _found_exploits = False
             try:
                 rc, stdout, _stderr = await run_tool(
                     cmd=["searchsploit", "--json", query],
@@ -243,6 +256,7 @@ async def _scan_port(
                             or data.get("results", [])
                         )
                         if results_list:
+                            _found_exploits = True
                             console.print(
                                 f"      [bold yellow]⚔[/] [bold]{tech.name} {tech.version}[/]"
                                 f" — [bold cyan]{len(results_list)}[/] exploits found"
@@ -275,6 +289,59 @@ async def _scan_port(
             except Exception:
                 pass
 
+            # Broad searchsploit fallback: if the specific version query
+            # returned nothing, try just the product name (e.g. "Nginx"
+            # instead of "Nginx 1.18.0").  This catches cases where
+            # searchsploit doesn't have version-specific entries but has
+            # generic exploits for the product.
+            if not _found_exploits:
+                broad_query = tech.name
+                if broad_query.lower() != query.lower():
+                    try:
+                        brc, bstdout, _ = await run_tool(
+                            cmd=["searchsploit", "--json", broad_query],
+                            timeout=30,
+                        )
+                        if brc in (0, 1) and bstdout.strip():
+                            import json as _json
+                            try:
+                                bdata = _json.loads(bstdout)
+                                broad_results = (
+                                    bdata.get("RESULTS_EXPLOIT", [])
+                                    or bdata.get("RESULTS_SEARCH", [])
+                                    or bdata.get("results", [])
+                                )
+                                if broad_results:
+                                    console.print(
+                                        f"      [bold yellow]⚔[/] [bold]{tech.name}[/]"
+                                        f" — [bold cyan]{len(broad_results)}[/] exploits (broad search)"
+                                    )
+                                    for entry in broad_results[:3]:
+                                        title = entry.get("Title", "") if isinstance(entry, dict) else str(entry)
+                                        if title:
+                                            console.print(
+                                                f"        [dim]•[/] {title}"
+                                            )
+                                    state.add_finding(Finding(
+                                        severity=Severity.INFO,
+                                        title=f"Exploits (broad): {tech.name} ({len(broad_results)} results)",
+                                        description=(
+                                            f"No exploits found for '{query}', but"
+                                            f" {len(broad_results)} found for broader"
+                                            f" query '{broad_query}'. "
+                                            f"Top: {', '.join(e.get('Title', '') if isinstance(e, dict) else str(e) for e in broad_results[:5])}"
+                                        ),
+                                        module="web",
+                                        evidence=f"searchsploit --json '{broad_query}'",
+                                        suggested_commands=[
+                                            f"searchsploit {broad_query}",
+                                        ],
+                                    ))
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
     # ================================================================
     # VHOST SCANNING — Tech detect + quick searchsploit on discovered
     # vhosts.  This is CRITICAL for CTF: subdomains often have
@@ -293,6 +360,74 @@ async def _scan_port(
                 continue
             _vhost_name = _vh_match.group(1).split(":")[0]
             _vhost_url = f"{urlsplit(url).scheme}://{_vhost_name}:{port}"
+
+            # Probe vhost for HTTP response details (auth type, headers, etc.)
+            _vhost_auth_type = ""
+            _vhost_server = ""
+            if shutil.which("curl"):
+                try:
+                    _crc, _cout, _ = await run_tool(
+                        cmd=[
+                            "curl", "-sI", "-o", "/dev/null",
+                            "-w", "%{http_code}",
+                            "--connect-timeout", "5",
+                            "--max-time", "10",
+                            _vhost_url,
+                        ],
+                        timeout=15,
+                    )
+                    if _crc == 0 and _cout.strip():
+                        # Get full headers for auth detection
+                        _hrc, _hout, _ = await run_tool(
+                            cmd=[
+                                "curl", "-sI",
+                                "--connect-timeout", "5",
+                                "--max-time", "10",
+                                _vhost_url,
+                            ],
+                            timeout=15,
+                        )
+                        if _hrc == 0 and _hout.strip():
+                            # Detect WWW-Authenticate header (401 responses)
+                            for _hline in _hout.splitlines():
+                                _hline_lower = _hline.lower()
+                                if _hline_lower.startswith("www-authenticate:"):
+                                    _vhost_auth_type = _hline.split(":", 1)[1].strip()
+                                    break
+                                if _hline_lower.startswith("server:"):
+                                    _vhost_server = _hline.split(":", 1)[1].strip()
+                except Exception:
+                    pass
+
+            # Report auth type findings — extremely valuable for CTF!
+            if _vhost_auth_type:
+                console.print(
+                    f"      [bold red][!][/] [bold]{_vhost_name}[/] requires auth:"
+                    f" [bold yellow]{_vhost_auth_type}[/]"
+                )
+                state.add_finding(Finding(
+                    severity=Severity.HIGH,
+                    title=f"Vhost auth required: {_vhost_name} ({_vhost_auth_type})",
+                    description=(
+                        f"Virtual host {_vhost_name} on port {port} returns HTTP 401 "
+                        f"with authentication type: {_vhost_auth_type}. "
+                        f"This is a high-value target — authenticated vhosts often "
+                        f"contain admin panels, APIs, or sensitive functionality."
+                    ),
+                    module="web",
+                    evidence=f"WWW-Authenticate: {_vhost_auth_type}",
+                    suggested_commands=[
+                        f"curl -v {_vhost_url}  # Test auth type",
+                    ] + (
+                        [f"hydra -L users.txt -P /usr/share/wordlists/rockyou.txt {_vhost_url} http-get"]
+                        if "basic" in _vhost_auth_type.lower() else []
+                    ),
+                ))
+
+            if _vhost_server:
+                console.print(
+                    f"      [dim]•[/] Server on [bold]{_vhost_name}[/]: {_vhost_server}"
+                )
 
             # Quick tech detection on the vhost
             try:
@@ -321,10 +456,11 @@ async def _scan_port(
                             f"        [dim]•[/] [bold]{t.name}[/]{ver_tag}"
                             f" [dim][{t.category}][/]{vuln_tag}"
                         )
-                    # Quick searchsploit on vhost tech
+                    # Quick searchsploit on vhost tech (with broad fallback)
                     _vh_versioned = [t for t in _vhost_specific if t.version and t.name]
                     if _vh_versioned and shutil.which("searchsploit"):
                         for t in _vh_versioned:
+                            _vh_found = False
                             try:
                                 rc, stdout, _ = await run_tool(
                                     cmd=["searchsploit", "--json", f"{t.name} {t.version}"],
@@ -340,6 +476,7 @@ async def _scan_port(
                                             or data.get("results", [])
                                         )
                                         if rlist:
+                                            _vh_found = True
                                             console.print(
                                                 f"        [bold yellow]⚔[/] {t.name} {t.version}"
                                                 f" — [bold cyan]{len(rlist)}[/] exploits"
@@ -366,6 +503,42 @@ async def _scan_port(
                                         pass
                             except Exception:
                                 pass
+
+                            # Broad fallback for vhost tech
+                            if not _vh_found and shutil.which("searchsploit"):
+                                try:
+                                    brc, bstdout, _ = await run_tool(
+                                        cmd=["searchsploit", "--json", t.name],
+                                        timeout=30,
+                                    )
+                                    if brc in (0, 1) and bstdout.strip():
+                                        import json as _json
+                                        try:
+                                            bdata = _json.loads(bstdout)
+                                            brlist = (
+                                                bdata.get("RESULTS_EXPLOIT", [])
+                                                or bdata.get("RESULTS_SEARCH", [])
+                                                or bdata.get("results", [])
+                                            )
+                                            if brlist:
+                                                console.print(
+                                                    f"        [bold yellow]⚔[/] {t.name}"
+                                                    f" — [bold cyan]{len(brlist)}[/] exploits (broad)"
+                                                )
+                                                for e in brlist[:3]:
+                                                    et = e.get("Title", "") if isinstance(e, dict) else str(e)
+                                                    if et:
+                                                        console.print(f"          [dim]•[/] {et}")
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                elif not _vhost_specific and _vhost_server:
+                    # No Wappalyzer tech detected but we found a server header
+                    console.print(
+                        f"      [dim]▸[/] Limited tech on [bold]{_vhost_name}[/]:"
+                        f" {_vhost_server} (401 blocks deeper detection)"
+                    )
             except Exception as exc:
                 logger.debug("[web:%d] Vhost tech scan failed for %s: %s", port, _vhost_name, exc)
 

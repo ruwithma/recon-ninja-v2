@@ -446,6 +446,7 @@ class ReconEngine:
             cmd.append("-O")
         cmd.extend([
             "-sC", "-sV",
+            "--version-intensity", "5",
             "-p", ports_str,
             "-oX", str(xml_out),
             *self.config.extra_nmap_flags,
@@ -666,6 +667,19 @@ class ReconEngine:
         if not self.quiet and self.state.all_findings:
             from recon_ninja.core.display import display_findings_panel
             display_findings_panel(self.state.all_findings)
+
+        # Re-display the port table with tech-enriched data now that
+        # Phase 3 has run technology detection.  When nmap -sV fails to
+        # detect product/version (shows "—"), the tech data from
+        # Wappalyzer/headers supplements the table.
+        if not self.quiet and self.state.detected_techs:
+            from recon_ninja.core.display import get_console
+            console = get_console()
+            console.print()
+            console.print(
+                "  [bold cyan][*][/] Updated service info with detected technologies:"
+            )
+            display_port_table(self.state.services, techs=self.state.detected_techs)
 
         logger.info(
             "Phase 3 complete: %d module results, %d total findings",

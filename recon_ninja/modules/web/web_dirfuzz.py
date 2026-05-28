@@ -164,9 +164,15 @@ def _determine_extensions(state: ScanState, port: int) -> str:  # noqa: C901
 def _parse_feroxbuster(raw: str) -> list[tuple[int, str, int]]:
     """Parse feroxbuster output for discovered paths.
 
-    Typical line format::
+    Typical line formats::
 
-        200      GET       48l http://10.10.10.1/admin
+        200      GET       48l      162w     2436c http://10.10.10.1/admin
+        301      GET        9l       28w      315c http://10.10.10.1/api
+        403      GET        7l       10w      162c http://10.10.10.1/secret
+
+    In quiet mode (``-q``) the output has 3 numeric columns (lines, words,
+    chars/size) between the method and URL.  Each may have a trailing letter
+    (``l``, ``w``, ``c``).
 
     Parameters
     ----------
@@ -179,18 +185,44 @@ def _parse_feroxbuster(raw: str) -> list[tuple[int, str, int]]:
         List of (status_code, path, size) tuples.
     """
     results: list[tuple[int, str, int]] = []
-    # Match lines: STATUS  METHOD  [optional columns]  SIZE  URL
-    pattern = re.compile(
-        r"^(\d{3})\s+\w+\s+(?:[\d\w]+\s+)*(\d+)[a-zA-Z]?\s+(https?://\S+)$", re.MULTILINE,
+
+    # Pattern 1: Full feroxbuster output with lines/words/chars columns
+    # Matches: STATUS  METHOD  LINES  WORDS  SIZE  URL
+    pattern_full = re.compile(
+        r"^(\d{3})\s+\w+\s+\d+[a-zA-Z]?\s+\d+[a-zA-Z]?\s+(\d+)[a-zA-Z]?\s+(https?://\S+)$",
+        re.MULTILINE,
     )
-    for match in pattern.finditer(raw):
+    # Pattern 2: Shorter feroxbuster output (some versions omit columns)
+    # Matches: STATUS  METHOD  SIZE  URL
+    pattern_short = re.compile(
+        r"^(\d{3})\s+\w+\s+(\d+)[a-zA-Z]?\s+(https?://\S+)$",
+        re.MULTILINE,
+    )
+
+    seen_urls: set[str] = set()
+
+    for match in pattern_full.finditer(raw):
         status = int(match.group(1))
-        url = match.group(3)
         size_str = match.group(2)
-        # size may be like "48l" (lines) — just extract digits
+        url = match.group(3)
         size_digits = re.sub(r"[^\d]", "", size_str)
         size = int(size_digits) if size_digits else 0
+        if url not in seen_urls:
+            seen_urls.add(url)
+            results.append((status, url, size))
+
+    # Only use short pattern for URLs not already captured by full pattern
+    for match in pattern_short.finditer(raw):
+        status = int(match.group(1))
+        size_str = match.group(2)
+        url = match.group(3)
+        if url in seen_urls:
+            continue
+        size_digits = re.sub(r"[^\d]", "", size_str)
+        size = int(size_digits) if size_digits else 0
+        seen_urls.add(url)
         results.append((status, url, size))
+
     return results
 
 
