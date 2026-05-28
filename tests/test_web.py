@@ -96,12 +96,28 @@ class TestWebCoreRedirectWarning:
         mock_console.print = lambda *a, **kw: None  # swallow Rich output
 
         with (
-            patch("recon_ninja.modules.web.web_core.shutil.which", side_effect=which_side_effect),
-            patch("recon_ninja.modules.web.web_core.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect),
-            patch("recon_ninja.modules.web.web_core.hostname_exists", return_value=False),
-            patch("recon_ninja.modules.web.web_core.get_console", return_value=mock_console),
+            patch(
+                "recon_ninja.modules.web.web_core.shutil.which",
+                side_effect=which_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_core.run_tool",
+                new_callable=AsyncMock,
+                side_effect=run_tool_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_core.hostname_exists",
+                return_value=False,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_core.get_console",
+                return_value=mock_console,
+            ),
         ):
-            result = await run_web_core("10.129.7.81", 80, "http://10.129.7.81:80", state, config, tmp_path)
+            result = await run_web_core(
+                "10.129.7.81", 80, "http://10.129.7.81:80",
+                state, config, tmp_path,
+            )
 
         assert result.status == "done"
         assert "smarthire.htb" in state.hostnames
@@ -131,10 +147,20 @@ class TestWebDirfuzzHeadChecks:
             return 0, "301 http://smarthire.htb/", ""
 
         with (
-            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
-            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.shutil.which",
+                side_effect=which_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.run_tool",
+                new_callable=AsyncMock,
+                side_effect=run_tool_side_effect,
+            ),
         ):
-            result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+            result = await run_web_dirfuzz(
+                "10.129.7.81", 80, "http://10.129.7.81:80",
+                None, state, config, tmp_path,
+            )
 
         titles = [finding.title for finding in result.findings]
         assert titles == ["Path found: /admin (HTTP 200)"]
@@ -143,7 +169,7 @@ class TestWebDirfuzzHeadChecks:
 class TestFeroxbusterParser:
     def test_parses_v1_and_v2_formats(self) -> None:
         from recon_ninja.modules.web.web_dirfuzz import _parse_feroxbuster
-        
+
         # v1.x output style (4 columns)
         v1_raw = "200      GET       48l http://10.129.7.182/admin\n301      GET        5l http://10.129.7.182/dashboard"
         results_v1 = _parse_feroxbuster(v1_raw)
@@ -152,7 +178,12 @@ class TestFeroxbusterParser:
         assert results_v1[1] == (301, "http://10.129.7.182/dashboard", 5)
 
         # v2.x output style (6 columns)
-        v2_raw = "200      GET       48l      128w     2345c http://10.129.7.182/admin\n301      GET        5l       10w      150c http://10.129.7.182/dashboard"
+        v2_raw = (
+            "200      GET       48l      128w     2345c"
+            " http://10.129.7.182/admin\n"
+            "301      GET        5l       10w      150c"
+            " http://10.129.7.182/dashboard"
+        )
         results_v2 = _parse_feroxbuster(v2_raw)
         assert len(results_v2) == 2
         assert results_v2[0] == (200, "http://10.129.7.182/admin", 2345)
@@ -162,11 +193,11 @@ class TestFeroxbusterParser:
 class TestWebTechVulnBounds:
     def test_eol_version_boundaries(self) -> None:
         from recon_ninja.modules.web.web_tech import _check_known_vulns
-        
+
         # nginx EOL prefix "1.1" should NOT match "1.18.0"
         cves_1_18 = _check_known_vulns("nginx", "1.18.0")
         assert "EOL" not in cves_1_18
-        
+
         # nginx EOL prefix "1.1" should match "1.1.2"
         cves_1_1 = _check_known_vulns("nginx", "1.1.2")
         assert "EOL" in cves_1_1
@@ -179,13 +210,13 @@ class TestWebTechVulnBounds:
 class TestWhatwebExclusions:
     def test_ignores_metadata_fields(self) -> None:
         from recon_ninja.modules.web.web_tech import _detect_from_whatweb
-        
+
         raw_whatweb = (
             "http://10.129.7.182 [200 OK] IP[10.129.7.182] Title[SmartHire] "
             "Country[RESERVED] Apache[2.4.41] Nginx[1.18.0]"
         )
         techs = _detect_from_whatweb(raw_whatweb, 80)
-        
+
         names = {t.name for t in techs}
         # Metadata should be skipped
         assert "IP" not in names
@@ -198,7 +229,9 @@ class TestWhatwebExclusions:
 
 class TestAdaptiveWebFuzz:
     @pytest.mark.asyncio
-    async def test_adaptive_fuzz_skips_stage2_when_no_meaningful_stage1_findings(self, tmp_path: Path) -> None:
+    async def test_adaptive_fuzz_skips_stage2_when_no_meaningful_stage1_findings(
+        self, tmp_path: Path,
+    ) -> None:
         state = _make_web_state(tmp_path)
         config = ReconConfig(adaptive_fuzz=True)
 
@@ -218,17 +251,29 @@ class TestAdaptiveWebFuzz:
             return 0, "", ""
 
         with (
-            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
-            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect) as mock_run,
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.shutil.which",
+                side_effect=which_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.run_tool",
+                new_callable=AsyncMock,
+                side_effect=run_tool_side_effect,
+            ) as mock_run,
         ):
-            result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+            result = await run_web_dirfuzz(
+                "10.129.7.81", 80, "http://10.129.7.81:80",
+                None, state, config, tmp_path,
+            )
 
         # It should run pre-flight + Stage 1 and skip Stage 2
         assert result.status == "done"
         assert mock_run.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_adaptive_fuzz_runs_stage2_when_stage1_finds_directories(self, tmp_path: Path) -> None:
+    async def test_adaptive_fuzz_runs_stage2_when_stage1_finds_directories(
+        self, tmp_path: Path,
+    ) -> None:
         state = _make_web_state(tmp_path)
         config = ReconConfig(adaptive_fuzz=True)
         # Ensure configured wordlist is distinct from small fallback
@@ -256,11 +301,24 @@ class TestAdaptiveWebFuzz:
             return 0, stage2_out, ""
 
         with (
-            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
-            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect) as mock_run,
-            patch("recon_ninja.modules.web.web_dirfuzz.Path.is_file", return_value=True),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.shutil.which",
+                side_effect=which_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.run_tool",
+                new_callable=AsyncMock,
+                side_effect=run_tool_side_effect,
+            ) as mock_run,
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.Path.is_file",
+                return_value=True,
+            ),
         ):
-            result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+            result = await run_web_dirfuzz(
+                "10.129.7.81", 80, "http://10.129.7.81:80",
+                None, state, config, tmp_path,
+            )
 
         assert result.status == "done"
         # It should run pre-flight + Stage 1 + Stage 2
@@ -271,7 +329,7 @@ class TestAdaptiveWebFuzz:
 class TestNiktoMetadataFiltering:
     def test_filters_noise_lines(self) -> None:
         from recon_ninja.modules.web.web_vuln import _parse_nikto_findings
-        
+
         raw_nikto = (
             "+ Target IP:          10.129.7.182\n"
             "+ Target Hostname:    smarthire.htb\n"
@@ -283,7 +341,7 @@ class TestNiktoMetadataFiltering:
             "+ /config.php: PHP config file found."
         )
         findings = _parse_nikto_findings(raw_nikto, "http://smarthire.htb")
-        
+
         titles = {f.title for f in findings}
         # Metadata / banners should be filtered out
         assert "Nikto [OSVDB-3092]: OSVDB-3092: /admin/: This might be interesting." in titles
@@ -298,7 +356,7 @@ class TestRecursiveVhostScanQueue:
     async def test_scans_dynamically_discovered_vhost(self, tmp_path: Path) -> None:
         state = _make_web_state(tmp_path)
         config = ReconConfig()
-        
+
         # Track which hosts are scanned
         scanned_hosts = []
 
@@ -331,7 +389,8 @@ class TestRecursiveVhostScanQueue:
             result = await run_web_module("10.129.7.81", state, config, tmp_path)
 
         assert result.status == "done"
-        # It should have scanned the initial target IP, then processed the newly discovered vhost from the queue
+        # It should have scanned the initial target IP, then processed
+        # the newly discovered vhost from the queue
         assert scanned_hosts == ["10.129.7.81", "models.smarthire.htb"]
 
 
@@ -359,11 +418,24 @@ class TestFeroxbusterCommandGen:
             return 0, "", ""
 
         with (
-            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
-            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect),
-            patch("recon_ninja.modules.web.web_dirfuzz.Path.is_file", return_value=True),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.shutil.which",
+                side_effect=which_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.run_tool",
+                new_callable=AsyncMock,
+                side_effect=run_tool_side_effect,
+            ),
+            patch(
+                "recon_ninja.modules.web.web_dirfuzz.Path.is_file",
+                return_value=True,
+            ),
         ):
-            await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+            await run_web_dirfuzz(
+                "10.129.7.81", 80, "http://10.129.7.81:80",
+                None, state, config, tmp_path,
+            )
 
         # First cmd is the pre-flight curl, second is feroxbuster Stage 1
         assert len(captured_cmds) >= 2
@@ -382,7 +454,7 @@ class TestWhatwebFixes:
             "http://10.129.7.182/login [302 Found] RedirectLocation[http://10.129.7.182/index.php]"
         )
         tech_map = _parse_whatweb(raw_output)
-        
+
         # Spurious 200 OK status matches should not exist
         assert "200 OK" not in tech_map
         assert "302 Found" not in tech_map
@@ -391,7 +463,7 @@ class TestWhatwebFixes:
         assert "Title" not in tech_map
         assert "Country" not in tech_map
         assert "RedirectLocation" not in tech_map
-        
+
         # Valid technologies should be kept
         assert tech_map["Apache"] == "2.4.52"
         assert tech_map["PHP"] == "7.4"
@@ -449,5 +521,5 @@ class TestScanStateAddHostname:
         state.add_hostname("smarthire.htb")
         state.add_hostname("")
         state.add_hostname("another.htb")
-        
+
         assert state.hostnames == ["smarthire.htb", "another.htb"]

@@ -82,7 +82,7 @@ EXTENSION_MAP: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-def _determine_extensions(state: ScanState, port: int) -> str:
+def _determine_extensions(state: ScanState, port: int) -> str:  # noqa: C901
     """Choose file extensions based on detected technology.
 
     Parameters
@@ -114,7 +114,12 @@ def _determine_extensions(state: ScanState, port: int) -> str:
             tech_stack.add("java")
         if "apache" in title_lower or "nginx" in title_lower or "php" in title_lower:
             tech_stack.add("lamp")
-        if "next.js" in title_lower or "node.js" in title_lower or "react" in title_lower or "express" in title_lower:
+        if (
+            "next.js" in title_lower
+            or "node.js" in title_lower
+            or "react" in title_lower
+            or "express" in title_lower
+        ):
             tech_stack.add("node")
 
     # Also check detected_techs directly
@@ -128,7 +133,12 @@ def _determine_extensions(state: ScanState, port: int) -> str:
             tech_stack.add("java")
         if "apache" in name_lower or "nginx" in name_lower or "php" in name_lower:
             tech_stack.add("lamp")
-        if "next.js" in name_lower or "node.js" in name_lower or "react" in name_lower or "express" in name_lower:
+        if (
+            "next.js" in name_lower
+            or "node.js" in name_lower
+            or "react" in name_lower
+            or "express" in name_lower
+        ):
             tech_stack.add("node")
 
     # Also check product directly
@@ -336,11 +346,21 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
         return
     if vhost not in state.hostnames:
         state.add_hostname(vhost)
-        auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
-        from recon_ninja.utils.hosts import get_ip_for_hostname, add_to_hosts
+        auto_add = (
+            config.module_toggles.get("_add_hosts", False)
+            or config.module_toggles.get("_htb", False)
+        )
+        from recon_ninja.utils.hosts import (
+            add_to_hosts,
+            get_ip_for_hostname,
+        )
         if auto_add and get_ip_for_hostname(vhost) != target:
             if add_to_hosts(target, vhost):
-                logger.info("[web_dirfuzz] Automatically added/updated %s -> %s in /etc/hosts", target, vhost)
+                logger.info(
+                    "[web_dirfuzz] Automatically added/updated"
+                    " %s -> %s in /etc/hosts",
+                    target, vhost,
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +369,7 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
 
 
 @module_guard()
-async def run_web_dirfuzz(
+async def run_web_dirfuzz(  # noqa: C901
     target: str,
     port: int,
     url: str,
@@ -554,12 +574,18 @@ async def run_web_dirfuzz(
 
     # Trigger Stage 2 if adaptive and Stage 1 found directories (excluding basic root redirects)
     has_meaningful_stage1 = any(
-        f.title.startswith("Fuzz:") and not f.title.startswith("Fuzz: / ") and not f.title.startswith("Fuzz: /rn_404_")
+        f.title.startswith("Fuzz:")
+        and not f.title.startswith("Fuzz: / ")
+        and not f.title.startswith("Fuzz: /rn_404_")
         for f in stage1_findings
     )
 
     if use_adaptive and has_meaningful_stage1 and stage1_wl != wordlist:
-        logger.info("[web_dirfuzz] Stage 1 found active directories. Upgrading to Stage 2 (large list: %s)", wordlist)
+        logger.info(
+            "[web_dirfuzz] Stage 1 found active directories."
+            " Upgrading to Stage 2 (large list: %s)",
+            wordlist,
+        )
         if shutil.which("feroxbuster"):
             ferox_out_2 = output_dir / "feroxbuster_stage2.txt"
             rc2, stdout2, stderr2 = await run_tool(
@@ -624,7 +650,10 @@ async def run_web_dirfuzz(
                         )
                     )
     elif use_adaptive and not has_meaningful_stage1:
-        logger.info("[web_dirfuzz] Stage 1 found no active directories. Skipping Stage 2 to save time.")
+        logger.info(
+            "[web_dirfuzz] Stage 1 found no active directories."
+            " Skipping Stage 2 to save time."
+        )
 
     # ------------------------------------------------------------------
     # 3. Vhost scan — if hostname is known
@@ -653,7 +682,13 @@ async def run_web_dirfuzz(
             from recon_ninja.utils.wordlists import resolve_wordlist
             seclists_base = config.module_toggles.get("_seclists_base")
             custom_dir = config.module_toggles.get("_custom_dir")
-            small_dns = resolve_wordlist("Discovery/DNS/subdomains-top1million-5000.txt", seclists_base, custom_dir) if seclists_base else None
+            small_dns = (
+                resolve_wordlist(
+                    "Discovery/DNS/subdomains-top1million-5000.txt",
+                    seclists_base, custom_dir,
+                )
+                if seclists_base else None
+            )
             if small_dns and small_dns.is_file():
                 stage1_vhost_wl = str(small_dns)
             else:
@@ -725,7 +760,11 @@ async def run_web_dirfuzz(
 
             if vhost_out.is_file():
                 try:
-                    ffuf_data = json.loads(vhost_out.read_text(encoding="utf-8", errors="replace"))
+                    ffuf_data = json.loads(
+                        vhost_out.read_text(
+                            encoding="utf-8", errors="replace"
+                        )
+                    )
                     for entry in ffuf_data.get("results", []):
                         vhost_found = entry.get("host", "")
                         status_found = entry.get("status", 0)
@@ -735,10 +774,21 @@ async def run_web_dirfuzz(
                             stage1_vhost_findings.append(
                                 Finding(
                                     severity=Severity.INFO,
-                                    title=f"Vhost found: {vhost_found} (HTTP {status_found}, {size_found}B)",
-                                    description=f"Virtual host discovered on {url}: {vhost_found}",
+                                    title=(
+                                        f"Vhost found: {vhost_found}"
+                                        f" (HTTP {status_found},"
+                                        f" {size_found}B)"
+                                    ),
+                                    description=(
+                                        f"Virtual host discovered on"
+                                        f" {url}: {vhost_found}"
+                                    ),
                                     module="web_dirfuzz",
-                                    evidence=f"Host: {vhost_found} Status: {status_found} Size: {size_found}",
+                                    evidence=(
+                                        f"Host: {vhost_found}"
+                                        f" Status: {status_found}"
+                                        f" Size: {size_found}"
+                                    ),
                                 )
                             )
                 except Exception as exc:
@@ -747,8 +797,16 @@ async def run_web_dirfuzz(
         findings.extend(stage1_vhost_findings)
 
         # Trigger Stage 2 vhost brute force if Stage 1 found active virtual hosts
-        if use_adaptive_vhost and stage1_vhost_findings and stage1_vhost_wl != vhost_wordlist:
-            logger.info("[web_dirfuzz] Stage 1 found active virtual hosts. Upgrading to Stage 2 (large list: %s)", vhost_wordlist)
+        if (
+            use_adaptive_vhost
+            and stage1_vhost_findings
+            and stage1_vhost_wl != vhost_wordlist
+        ):
+            logger.info(
+                "[web_dirfuzz] Stage 1 found active virtual hosts."
+                " Upgrading to Stage 2 (large list: %s)",
+                vhost_wordlist,
+            )
             if shutil.which("gobuster"):
                 vhost_out_2 = output_dir / "gobuster_vhost_stage2.txt"
                 cmd2 = [
@@ -810,7 +868,11 @@ async def run_web_dirfuzz(
 
                 if vhost_out_2.is_file():
                     try:
-                        ffuf_data2 = json.loads(vhost_out_2.read_text(encoding="utf-8", errors="replace"))
+                        ffuf_data2 = json.loads(
+                            vhost_out_2.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                        )
                         for entry in ffuf_data2.get("results", []):
                             vhost_found = entry.get("host", "")
                             status_found = entry.get("status", 0)
@@ -820,16 +882,34 @@ async def run_web_dirfuzz(
                                 findings.append(
                                     Finding(
                                         severity=Severity.INFO,
-                                        title=f"Vhost found: {vhost_found} (HTTP {status_found}, {size_found}B)",
-                                        description=f"Virtual host discovered on {url}: {vhost_found}",
+                                        title=(
+                                            f"Vhost found: {vhost_found}"
+                                            f" (HTTP {status_found},"
+                                            f" {size_found}B)"
+                                        ),
+                                        description=(
+                                            f"Virtual host discovered on"
+                                            f" {url}: {vhost_found}"
+                                        ),
                                         module="web_dirfuzz",
-                                        evidence=f"Host: {vhost_found} Status: {status_found} Size: {size_found}",
+                                        evidence=(
+                                            f"Host: {vhost_found}"
+                                            f" Status: {status_found}"
+                                            f" Size: {size_found}"
+                                        ),
                                     )
                                 )
                     except Exception as exc:
                         logger.debug("Failed to parse ffuf vhost output: %s", exc)
-        elif use_adaptive_vhost and not stage1_vhost_findings and not passive_subdomains_found:
-            logger.info("[web_dirfuzz] Stage 1 found no active virtual hosts. Skipping Stage 2 to save time.")
+        elif (
+            use_adaptive_vhost
+            and not stage1_vhost_findings
+            and not passive_subdomains_found
+        ):
+            logger.info(
+                "[web_dirfuzz] Stage 1 found no active virtual hosts."
+                " Skipping Stage 2 to save time."
+            )
     else:
         logger.debug("No hostname known or subdomain scan — skipping vhost scan")
 
