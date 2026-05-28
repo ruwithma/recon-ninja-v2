@@ -423,7 +423,6 @@ class ReconEngine:
         cmd.extend([
             "-sC", "-sV",
             "-p", ports_str,
-            "--min-rate", "3000",
             "-oX", str(xml_out),
             *self.config.extra_nmap_flags,
             self.target,
@@ -450,6 +449,15 @@ class ReconEngine:
         for svc in self.state.services.values():
             if svc.hostname and svc.hostname not in self.state.hostnames:
                 self.state.hostnames.append(svc.hostname)
+                # Auto-add to hosts if enabled
+                auto_add = self.config.module_toggles.get("_add_hosts", False) or self.config.module_toggles.get("_htb", False)
+                from recon_ninja.utils.hosts import hostname_exists, add_to_hosts
+                if auto_add and not hostname_exists(svc.hostname):
+                    if add_to_hosts(self.target, svc.hostname):
+                        logger.info("Automatically added %s -> %s to /etc/hosts from nmap service info", self.target, svc.hostname)
+                        if not self.quiet:
+                            from recon_ninja.core.display import get_console
+                            get_console().print(f"  [bold green][+][/] Automatically added [bold cyan]{svc.hostname}[/] to /etc/hosts")
 
         # Classify the box
         self.state.box_profile = self._classify_box()

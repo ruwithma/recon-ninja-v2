@@ -32,6 +32,7 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "rustscan_ulimit": 5000,
         "udp_enabled": False,
         "stealth_mode": False,
+        "adaptive_fuzz": True,
     },
     "wordlists": {
         "seclists_base": "/usr/share/seclists",
@@ -78,6 +79,7 @@ class ScanConfig:
     rustscan_ulimit: int = 5000
     udp_enabled: bool = False
     stealth_mode: bool = False
+    adaptive_fuzz: bool = True
 
 
 @dataclass

@@ -193,6 +193,7 @@ def _build_recon_config(
     verbose: bool,
     quiet: bool,
     proxy: Optional[str],
+    seclists_path: Optional[str] = None,
 ) -> ReconConfig:
     """Build a :class:`ReconConfig` from the merged file config + CLI flags."""
 
@@ -202,6 +203,7 @@ def _build_recon_config(
         osint_enabled=not no_osint,
         max_concurrent=threads or merge_cfg.scan.default_threads,
         default_timeout=timeout or merge_cfg.scan.default_timeout,
+        adaptive_fuzz=merge_cfg.scan.adaptive_fuzz,
     )
 
     # --- Module toggles ---------------------------------------------------
@@ -256,12 +258,57 @@ def _build_recon_config(
     cfg.extra_nmap_flags = extra_flags
 
     # --- Wordlists --------------------------------------------------------
+    from recon_ninja.utils.wordlists import get_dir_wordlist, get_vhost_wordlist, resolve_wordlist
+
+    base_seclists = seclists_path or merge_cfg.wordlists.seclists_base
+    custom_dir = merge_cfg.wordlists.custom_dir
+
     if wordlist:
         cfg.web_wordlist = wordlist
     else:
-        cfg.web_wordlist = merge_cfg.wordlists.dir_medium_path
+        # 1. Try to resolve using get_dir_wordlist
+        resolved_web = get_dir_wordlist(base_seclists, custom_dir) if base_seclists else None
+        if resolved_web and resolved_web.is_file():
+            cfg.web_wordlist = resolved_web
+        else:
+            # 2. Try the configured relative path
+            resolved_med = resolve_wordlist(merge_cfg.wordlists.dir_medium, base_seclists, custom_dir) if base_seclists else None
+            if resolved_med and resolved_med.is_file():
+                cfg.web_wordlist = resolved_med
+            else:
+                # 3. Fallback to standard wordlists that commonly exist on Kali
+                fallbacks = [
+                    Path("/usr/share/wordlists/dirb/common.txt"),
+                    Path("/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt"),
+                    Path("/usr/share/wordlists/dirb/big.txt"),
+                ]
+                for fb in fallbacks:
+                    if fb.is_file():
+                        cfg.web_wordlist = fb
+                        break
+                else:
+                    cfg.web_wordlist = merge_cfg.wordlists.dir_medium_path
 
-    cfg.dns_wordlist = merge_cfg.wordlists.vhosts_path
+    # DNS wordlist
+    resolved_dns = get_vhost_wordlist(base_seclists, custom_dir) if base_seclists else None
+    if resolved_dns and resolved_dns.is_file():
+        cfg.dns_wordlist = resolved_dns
+    else:
+        resolved_vh = resolve_wordlist(merge_cfg.wordlists.vhosts, base_seclists, custom_dir) if base_seclists else None
+        if resolved_vh and resolved_vh.is_file():
+            cfg.dns_wordlist = resolved_vh
+        else:
+            fallbacks_dns = [
+                Path("/usr/share/wordlists/dns/subdomains-top1million-5000.txt"),
+                Path("/usr/share/wordlists/amass/subdomains-top1million-5000.txt"),
+                Path("/usr/share/wordlists/dirb/common.txt"),
+            ]
+            for fb in fallbacks_dns:
+                if fb.is_file():
+                    cfg.dns_wordlist = fb
+                    break
+            else:
+                cfg.dns_wordlist = merge_cfg.wordlists.vhosts_path
 
     # --- Domain detection -------------------------------------------------
     cfg.is_domain = bool(re.match(r"^[a-zA-Z]", target))
@@ -334,6 +381,8 @@ def _display_preflight(
     vpn_ok: Optional[tuple[bool, str]],
     tools: dict[str, bool],
     seclists_path: Optional[str],
+    web_wordlist: Path,
+    dns_wordlist: Path,
     output_dir: Path,
 ) -> None:
     """Print the pre-flight checklist panel."""
@@ -363,6 +412,12 @@ def _display_preflight(
 
     seclists_status = f"[bold green][+][/] [green]{seclists_path}[/green]" if seclists_path else "[bold yellow][!][/] [yellow]not found[/yellow]"
     table.add_row("SecLists", seclists_status)
+
+    web_wl_status = f"[bold green][+][/] [green]{web_wordlist}[/green]" if web_wordlist.is_file() else f"[bold red][x][/] [red]{web_wordlist} (not found)[/red]"
+    table.add_row("Dir Fuzz", web_wl_status)
+
+    dns_wl_status = f"[bold green][+][/] [green]{dns_wordlist}[/green]" if dns_wordlist.is_file() else f"[bold red][x][/] [red]{dns_wordlist} (not found)[/red]"
+    table.add_row("Subdomain", dns_wl_status)
 
     table.add_row("Output", str(output_dir))
 
@@ -502,18 +557,6 @@ def scan_cmd(
         timestamp_dirs=merge_cfg.output.timestamp_dirs,
     )
 
-    # 3h. Display banner + pre-flight checklist
-    if not quiet:
-        _display_preflight(
-            target=target,
-            resolved_ip=resolved_ip,
-            is_root_user=is_root_user,
-            vpn_ok=vpn_result,
-            tools=tools,
-            seclists_path=seclists_path,
-            output_dir=output_dir,
-        )
-
     # ------------------------------------------------------------------
     # Build ReconConfig from MergeConfig + CLI flags
     # ------------------------------------------------------------------
@@ -546,11 +589,16 @@ def scan_cmd(
         verbose=verbose,
         quiet=quiet,
         proxy=proxy,
+        seclists_path=seclists_path,
     )
 
     # Store extra CLI context
     recon_config.module_toggles["_html_report"] = html
     recon_config.module_toggles["_json_report"] = json_output
+    recon_config.module_toggles["_add_hosts"] = add_hosts
+    recon_config.module_toggles["_htb"] = htb
+    recon_config.module_toggles["_seclists_base"] = seclists_path or merge_cfg.wordlists.seclists_base
+    recon_config.module_toggles["_custom_dir"] = merge_cfg.wordlists.custom_dir
     if creds:
         recon_config.module_toggles["_creds"] = creds  # type: ignore[assignment]
     if domain:
@@ -559,6 +607,20 @@ def scan_cmd(
         recon_config.module_toggles["_proxy"] = proxy  # type: ignore[assignment]
     recon_config.module_toggles["_verbose"] = verbose
     recon_config.module_toggles["_quiet"] = quiet
+
+    # 3h. Display banner + pre-flight checklist
+    if not quiet:
+        _display_preflight(
+            target=target,
+            resolved_ip=resolved_ip,
+            is_root_user=is_root_user,
+            vpn_ok=vpn_result,
+            tools=tools,
+            seclists_path=seclists_path,
+            web_wordlist=recon_config.web_wordlist,
+            dns_wordlist=recon_config.dns_wordlist,
+            output_dir=output_dir,
+        )
 
     # ------------------------------------------------------------------
     # 4. Resume or fresh state

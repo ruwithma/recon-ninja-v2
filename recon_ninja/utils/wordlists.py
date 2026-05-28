@@ -155,7 +155,7 @@ def _resolve_first(
     return None
 
 
-def get_dir_wordlist(seclists_base: str) -> Path | None:
+def get_dir_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
     """Return a directory brute-force wordlist from SecLists.
 
     Priority order:
@@ -168,67 +168,103 @@ def get_dir_wordlist(seclists_base: str) -> Path | None:
     ----------
     seclists_base : str
         Root directory of the SecLists collection.
+    custom_dir : str | None
+        Optional custom directory.
 
     Returns
     -------
     Path | None
         Path to the first available directory wordlist, or ``None``.
     """
-    return _resolve_first(_DIR_WORDLIST_CANDIDATES, seclists_base)
+    return _resolve_first(_DIR_WORDLIST_CANDIDATES, seclists_base, custom_dir)
 
 
-def get_vhost_wordlist(seclists_base: str) -> Path | None:
+def get_dir_small_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
+    """Return a small directory brute-force wordlist from SecLists.
+
+    Priority order:
+      1. ``common.txt``
+      2. ``raft-medium-directories-lowercase.txt``
+
+    Parameters
+    ----------
+    seclists_base : str
+        Root directory of the SecLists collection.
+    custom_dir : str | None
+        Optional custom directory.
+
+    Returns
+    -------
+    Path | None
+        Path to the first available directory wordlist, or ``None``.
+    """
+    candidates = [
+        "Discovery/Web-Content/common.txt",
+        "Discovery/Web-Content/raft-medium-directories-lowercase.txt",
+        "Discovery/Web-Content/raft-medium-directories.txt",
+    ]
+    return _resolve_first(candidates, seclists_base, custom_dir)
+
+
+def get_vhost_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
     """Return a virtual-host / subdomain wordlist from SecLists.
 
     Parameters
     ----------
     seclists_base : str
         Root directory of the SecLists collection.
+    custom_dir : str | None
+        Optional custom directory.
 
     Returns
     -------
     Path | None
         Path to the first available vhost wordlist, or ``None``.
     """
-    return _resolve_first(_VHOST_WORDLIST_CANDIDATES, seclists_base)
+    return _resolve_first(_VHOST_WORDLIST_CANDIDATES, seclists_base, custom_dir)
 
 
-def get_username_wordlist(seclists_base: str) -> Path | None:
+def get_username_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
     """Return a username wordlist from SecLists.
 
     Parameters
     ----------
     seclists_base : str
         Root directory of the SecLists collection.
+    custom_dir : str | None
+        Optional custom directory.
 
     Returns
     -------
     Path | None
         Path to the first available username wordlist, or ``None``.
     """
-    return _resolve_first(_USERNAME_WORDLIST_CANDIDATES, seclists_base)
+    return _resolve_first(_USERNAME_WORDLIST_CANDIDATES, seclists_base, custom_dir)
 
 
-def get_snmp_wordlist(seclists_base: str) -> Path | None:
+def get_snmp_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
     """Return an SNMP community-string wordlist from SecLists.
 
     Parameters
     ----------
     seclists_base : str
         Root directory of the SecLists collection.
+    custom_dir : str | None
+        Optional custom directory.
 
     Returns
     -------
     Path | None
         Path to the first available SNMP wordlist, or ``None``.
     """
-    return _resolve_first(_SNMP_WORDLIST_CANDIDATES, seclists_base)
+    return _resolve_first(_SNMP_WORDLIST_CANDIDATES, seclists_base, custom_dir)
 
 
 __all__: list[str] = [
     "resolve_wordlist",
     "find_seclists",
     "get_dir_wordlist",
+    "get_dir_small_wordlist",
     "get_vhost_wordlist",
     "get_username_wordlist",
     "get_snmp_wordlist",

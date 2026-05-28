@@ -194,3 +194,56 @@ class TestWhatwebExclusions:
         # Actual technologies should be parsed
         assert "Apache" in names
         assert "Nginx" in names
+
+
+class TestAdaptiveWebFuzz:
+    @pytest.mark.asyncio
+    async def test_adaptive_fuzz_skips_stage2_when_no_meaningful_stage1_findings(self, tmp_path: Path) -> None:
+        state = _make_web_state(tmp_path)
+        config = ReconConfig(adaptive_fuzz=True)
+
+        def which_side_effect(cmd: str):
+            return "/usr/bin/feroxbuster" if cmd == "feroxbuster" else None
+
+        # Simulate Stage 1 returning no output, meaning no findings
+        async def run_tool_side_effect(*args, **kwargs):
+            return 0, "", ""
+
+        with (
+            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
+            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect) as mock_run,
+        ):
+            result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+
+        # It should only run once (Stage 1) and skip Stage 2
+        assert result.status == "done"
+        assert mock_run.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_adaptive_fuzz_runs_stage2_when_stage1_finds_directories(self, tmp_path: Path) -> None:
+        state = _make_web_state(tmp_path)
+        config = ReconConfig(adaptive_fuzz=True)
+        # Ensure configured wordlist is distinct from small fallback
+        config.web_wordlist = Path("/tmp/configured_wordlist.txt")
+
+        def which_side_effect(cmd: str):
+            return "/usr/bin/feroxbuster" if cmd == "feroxbuster" else None
+
+        # Stage 1 stdout returns an active directory, Stage 2 returns empty
+        stage1_out = "200      GET       48l http://10.129.7.81/dashboard"
+        stage2_out = ""
+
+        async def run_tool_side_effect(*args, **kwargs):
+            return 0, stage1_out, ""
+
+        with (
+            patch("recon_ninja.modules.web.web_dirfuzz.shutil.which", side_effect=which_side_effect),
+            patch("recon_ninja.modules.web.web_dirfuzz.run_tool", new_callable=AsyncMock, side_effect=run_tool_side_effect) as mock_run,
+            patch("recon_ninja.modules.web.web_dirfuzz.Path.is_file", return_value=True),
+        ):
+            result = await run_web_dirfuzz("10.129.7.81", 80, "http://10.129.7.81:80", None, state, config, tmp_path)
+
+        assert result.status == "done"
+        # It should run Stage 1, detect /dashboard, and run Stage 2
+        assert mock_run.call_count == 2
+        assert any("dashboard" in f.title for f in result.findings)

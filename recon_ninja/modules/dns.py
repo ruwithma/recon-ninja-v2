@@ -160,6 +160,12 @@ async def run_dns_module(
         dnsrecon_out = dns_dir / "dnsrecon.txt"
 
         # Locate subdomain wordlist
+        use_adaptive_dns = config.adaptive_fuzz and not config.fast_mode
+        passive_subdomains_found = any(
+            f.module == "osint" and "subdomain" in f.title.lower()
+            for f in state.all_findings
+        )
+
         subdomain_wordlist = Path(
             "/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
         )
@@ -168,15 +174,41 @@ async def run_dns_module(
         if not subdomain_wordlist.is_file():
             subdomain_wordlist = Path("/usr/share/wordlists/dirb/big.txt")
 
+        # Determine stage 1 wordlist
+        stage1_wl = subdomain_wordlist
+        if use_adaptive_dns and not passive_subdomains_found:
+            # Probe with a smaller wordlist first if available
+            from recon_ninja.utils.wordlists import resolve_wordlist
+            seclists_base = config.module_toggles.get("_seclists_base")
+            custom_dir = config.module_toggles.get("_custom_dir")
+            small_dns = resolve_wordlist("Discovery/DNS/subdomains-top1million-5000.txt", seclists_base, custom_dir) if seclists_base else None
+            if small_dns and small_dns.is_file():
+                stage1_wl = small_dns
+
         dnsrecon_args: list[str] = ["-d", domain, "-t", "axfr,srv"]
-        if subdomain_wordlist.is_file():
-            dnsrecon_args.extend(["-t", "brt", "-D", str(subdomain_wordlist)])
+        if stage1_wl.is_file():
+            dnsrecon_args.extend(["-t", "brt", "-D", str(stage1_wl)])
 
         cmd = ["dnsrecon"] + dnsrecon_args
         rc, stdout, stderr = await run_tool(
             cmd, output_file=dnsrecon_out, timeout=timeout
         )
         raw_outputs.append(stdout or stderr)
+
+        # Stage 2 escalation
+        if stdout:
+            subdomains_stage1 = _parse_dnsrecon_subdomains(stdout)
+            # If we used a smaller list, and found subdomains, upgrade to the full/dns_wordlist
+            if use_adaptive_dns and subdomains_stage1 and stage1_wl != config.dns_wordlist and config.dns_wordlist.is_file():
+                logger.info("[dns] Stage 1 found active subdomains. Upgrading to Stage 2 (large list: %s)", config.dns_wordlist)
+                dnsrecon_args2 = ["-d", domain, "-t", "brt", "-D", str(config.dns_wordlist)]
+                cmd2 = ["dnsrecon"] + dnsrecon_args2
+                rc2, stdout2, stderr2 = await run_tool(
+                    cmd2, output_file=dns_dir / "dnsrecon_stage2.txt", timeout=timeout
+                )
+                raw_outputs.append(stdout2 or stderr2)
+                if stdout2:
+                    stdout = stdout + "\n" + stdout2
 
         if stdout:
             subdomains = _parse_dnsrecon_subdomains(stdout)

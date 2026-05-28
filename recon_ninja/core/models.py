@@ -400,6 +400,8 @@ class ReconConfig:
     nuclei_templates: str = ""
     # Target is a domain (vs IP)
     is_domain: bool = False
+    # Smart adaptive multi-stage fuzzing
+    adaptive_fuzz: bool = True
 
     def is_module_enabled(self, module_name: str) -> bool:
         """Check whether a specific module is enabled.

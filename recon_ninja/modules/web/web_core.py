@@ -35,7 +35,7 @@ from recon_ninja.core.models import (
 from recon_ninja.core.runner import run_tool
 from recon_ninja.core.utils import module_guard
 from recon_ninja.core.display import get_console
-from recon_ninja.utils.hosts import hostname_exists
+from recon_ninja.utils.hosts import hostname_exists, add_to_hosts
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +268,16 @@ async def run_web_core(
                 logger.debug("[web_core] Discovered hostname from headers: %s", host)
 
             if target_is_ip and not hostname_exists(host):
+                # Auto-add if enabled
+                auto_add = config.module_toggles.get("_add_hosts", False) or config.module_toggles.get("_htb", False)
+                if auto_add:
+                    if add_to_hosts(target, host):
+                        logger.info("[web_core] Automatically added %s -> %s to /etc/hosts", target, host)
+                        if not config.module_toggles.get("_quiet", False):
+                            console = get_console()
+                            console.print(f"  [bold green][+][/] Automatically added [bold cyan]{host}[/] to /etc/hosts")
+                        continue
+
                 console = get_console()
                 console.print()
                 console.print(
