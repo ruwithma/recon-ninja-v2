@@ -136,7 +136,11 @@ class ReconEngine:
             (2, self.phase2_deep_scan),
             (3, self.phase3_modules),
             (4, self.phase4_osint),
-            (5, self.phase5_vuln_correlate),
+            # Phase 5 (vuln_correlate) disabled — searchsploit already
+            # runs inline during Phase 3 web module. Deep nikto/nuclei
+            # scans are disabled for fast CTF recon. Re-enable by
+            # uncommenting the line below and the web_vuln/web_cms imports.
+            # (5, self.phase5_vuln_correlate),
             (6, self.phase6_loot),
             (7, self.phase7_report),
         ]

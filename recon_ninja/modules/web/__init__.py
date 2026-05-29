@@ -4,16 +4,14 @@ This is the entry point imported by :mod:`recon_ninja.core.engine`.  It
 iterates over every HTTP/HTTPS port discovered during Phase 2, constructs
 the appropriate URL, and then runs the sub-modules:
 
-    web_core  →  web_tech  →  web_dirfuzz  →  [web_vuln | web_cms]  (concurrent)
+    web_core  →  web_tech  →  web_dirfuzz
 
-**CTF-first design**: directory fuzzing and vhost enumeration run BEFORE
-slow vulnerability scanners (nikto, nuclei).  This ensures the CTF player
-gets actionable paths and subdomains quickly, while the longer vuln scans
-continue in the background.
+**CTF-first design**: directory fuzzing and vhost enumeration run with
+aggressive timeouts (120s max). Quick searchsploit lookups on detected
+tech versions provide instant exploit intelligence.
 
-**Priority output**: Fast results (dirs, vhosts, tech) are printed
-IMMEDIATELY as they are found, so CTF players can start working
-while slow vuln scans continue in the background.
+**Fast results only**: Deep vuln scanners (nikto, nuclei, CMS) are
+disabled for now. Focus is on speed and actionable CTF intel.
 """
 
 from __future__ import annotations
@@ -35,8 +33,9 @@ from recon_ninja.core.models import (
 from recon_ninja.modules.web.web_core import run_web_core
 from recon_ninja.modules.web.web_tech import run_web_tech
 from recon_ninja.modules.web.web_dirfuzz import run_web_dirfuzz
-from recon_ninja.modules.web.web_vuln import run_web_vuln
-from recon_ninja.modules.web.web_cms import run_web_cms
+# Deep vuln scans disabled for now — focus on fast CTF recon:
+# from recon_ninja.modules.web.web_vuln import run_web_vuln
+# from recon_ninja.modules.web.web_cms import run_web_cms
 from recon_ninja.core.utils import module_guard
 from recon_ninja.core.display import get_console
 from recon_ninja.core.runner import run_tool
@@ -546,46 +545,11 @@ async def _scan_port(
             except Exception as exc:
                 logger.debug("[web:%d] Vhost tech scan failed for %s: %s", port, _vhost_name, exc)
 
-    # Print a clear separator so CTF players know they can start working
+    # Print a clear completion message
     console.print(
-        "    [bold bright_green]⚡ Fast results complete!"
-        " Deep vuln scans continuing in background…[/]"
+        f"    [bold bright_green]⚡ Web scan on port {port} complete![/]"
     )
 
-    # ================================================================
-    # SLOW PHASE — Nikto + Nuclei + CMS (concurrent, less urgent)
-    # These run in parallel but CTF players already have what they need
-    # ================================================================
-    logger.info(
-        "[web:%d] Running web_vuln + web_cms concurrently …", port,
-    )
-    console.print(
-        f"    [dim]▸[/] Running deep vuln scanners on port {port}"
-        f" (nikto, nuclei, cms)…"
-    )
-
-    async def _safe_run(name: str, coro):
-        """Wrap a sub-module call so exceptions don't cancel siblings."""
-        try:
-            return await coro
-        except Exception as exc:
-            logger.exception("[web:%d] %s failed: %s", port, name, exc)
-            return ModuleResult(
-                module_name=name,
-                status="error",
-                error_message=str(exc),
-            )
-
-    concurrent_results = await asyncio.gather(
-        _safe_run("web_vuln", run_web_vuln(
-            target, port, url, state, config, port_dir,
-        )),
-        _safe_run("web_cms", run_web_cms(
-            target, port, url, state, config, port_dir,
-        )),
-    )
-
-    results.extend(concurrent_results)
     return results
 
 

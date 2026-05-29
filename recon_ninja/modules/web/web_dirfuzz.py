@@ -619,25 +619,10 @@ async def run_web_dirfuzz(  # noqa: C901
                 logger.debug("HEAD check raised: %s", result)
 
     # ------------------------------------------------------------------
-    # 2. Directory fuzzing — adaptive feroxbuster or gobuster
+    # 2. Directory fuzzing — single fast feroxbuster or gobuster run
+    #    CTF-first: one pass with the standard wordlist, depth 1, 120s max.
+    #    The common-path HEAD checks (step 1) already cover most CTF pages.
     # ------------------------------------------------------------------
-    # Determine if we should use adaptive mode
-    use_adaptive = config.adaptive_fuzz and not config.fast_mode
-
-    # Resolve small directory wordlist for Stage 1
-    from recon_ninja.utils.wordlists import get_dir_small_wordlist
-    seclists_base = config.module_toggles.get("_seclists_base")
-    custom_dir = config.module_toggles.get("_custom_dir")
-
-    small_wl = get_dir_small_wordlist(seclists_base, custom_dir) if seclists_base else None
-    if not small_wl or not small_wl.is_file():
-        # Fallback to common.txt inside standard path
-        small_wl = Path("/usr/share/wordlists/dirb/common.txt")
-        if not small_wl.is_file():
-            small_wl = Path(wordlist)
-
-    stage1_wl = str(small_wl) if use_adaptive else wordlist
-    stage1_findings: list[Finding] = []
     target_reachable = True  # default optimistic; set by preflight check
 
     if shutil.which("feroxbuster"):
@@ -690,33 +675,30 @@ async def run_web_dirfuzz(  # noqa: C901
                 url,
             )
             raw_parts.append(
-                "=== feroxbuster (Stage 1) === SKIPPED (target unreachable)"
+                "=== feroxbuster === SKIPPED (target unreachable)"
             )
         else:
             ferox_cmd = [
                 "feroxbuster",
                 "-u", url,
-                "-w", stage1_wl,
+                "-w", wordlist,
                 "-x", ferox_extensions,
                 "-t", ferox_threads,
                 "--timeout", "4",
                 "--connect-timeout", "3",
                 "--dont-filter",  # don't auto-filter same-sized responses
+                "--depth", "1",   # depth 1 for speed — most CTF dirs at top level
                 "-q",  # quiet mode
             ]
             # Filter only true junk codes — NOT 403 (interesting for CTF!)
             ferox_cmd.extend(
                 ["--filter-code", "429,502,503"]
             )
-            if use_adaptive:
-                ferox_cmd.append("--no-recursion")
-            else:
-                ferox_cmd.extend(["--depth", depth])
 
-            # Cap feroxbuster at 180s for CTF use — 7+ minute hangs
-            # are unacceptable.  Most CTF directories are found in the
-            # first 2 minutes of scanning.
-            ferox_timeout = min(int(config.default_timeout * 1.5), 180)
+            # Cap feroxbuster at 120s for CTF use — long hangs are
+            # unacceptable. Most CTF directories are found in the first
+            # 60 seconds of scanning.
+            ferox_timeout = 120
 
             # Stream feroxbuster output so paths appear in REAL-TIME
             # instead of waiting for the entire scan to finish silently.
@@ -724,7 +706,6 @@ async def run_web_dirfuzz(  # noqa: C901
             from recon_ninja.core.display import get_console
 
             collected_lines: list[str] = []
-            live_findings_count = 0
             _stream_pattern = re.compile(
                 r"^(\d{3})\s+\w+\s+\d+[a-zA-Z]?\s+\d+[a-zA-Z]?\s+(\d+)[a-zA-Z]?\s+(https?://\S+)$"
             )
@@ -734,6 +715,7 @@ async def run_web_dirfuzz(  # noqa: C901
             _seen_stream_urls: set[str] = set()
             console = get_console()
 
+            rc = -1  # default rc; will be set on success
             try:
                 async for line in run_tool_streaming(
                     cmd=ferox_cmd,
@@ -745,10 +727,9 @@ async def run_web_dirfuzz(  # noqa: C901
                     match = _stream_pattern.match(line) or _stream_pattern_short.match(line)
                     if match:
                         status_code = match.group(1)
-                        found_url = match.group(3) if _stream_pattern.match(line) else match.group(3)
+                        found_url = match.group(3)
                         if found_url not in _seen_stream_urls:
                             _seen_stream_urls.add(found_url)
-                            live_findings_count += 1
                             # Print discovered path immediately!
                             path = found_url.replace(url, "") or "/"
                             if status_code.startswith("2"):
@@ -776,6 +757,7 @@ async def run_web_dirfuzz(  # noqa: C901
                                     f"      [dim]•[/] [bold]{path}[/]"
                                     f" [dim](HTTP {status_code})[/]"
                                 )
+                rc = 0  # streaming completed successfully
             except Exception as exc:
                 logger.warning("[web_dirfuzz] feroxbuster streaming failed: %s", exc)
                 # Fallback to non-streaming if streaming fails
@@ -789,7 +771,7 @@ async def run_web_dirfuzz(  # noqa: C901
             # Reconstruct stdout from collected lines for parsing below
             stdout = "\n".join(collected_lines)
             raw_parts.append(
-                f"=== feroxbuster (Stage 1) ===\n{stdout[:5000]}"
+                f"=== feroxbuster ===\n{stdout[:5000]}"
             )
 
             if rc in (0, 1) and stdout.strip():
@@ -798,7 +780,7 @@ async def run_web_dirfuzz(  # noqa: C901
                 ):
                     path = found_url.replace(url, "") or "/"
                     sev = _severity_for_status(status, path)
-                    stage1_findings.append(
+                    findings.append(
                         Finding(
                             severity=sev,
                             title=(
@@ -819,21 +801,21 @@ async def run_web_dirfuzz(  # noqa: C901
             cmd=[
                 "gobuster", "dir",
                 "-u", url,
-                "-w", stage1_wl,
+                "-w", wordlist,
                 "-x", extensions,
                 "-t", threads,
                 "--timeout", "7s",
                 "-q",
             ],
             output_file=gobuster_out,
-            timeout=min(int(config.default_timeout * 1.5), 180),
+            timeout=120,
         )
-        raw_parts.append(f"=== gobuster dir (Stage 1) ===\n{stdout[:5000]}")
+        raw_parts.append(f"=== gobuster dir ===\n{stdout[:5000]}")
 
         if rc in (0, 1) and stdout.strip():
             for status, path, size in _parse_gobuster(stdout):
                 sev = _severity_for_status(status, path)
-                stage1_findings.append(
+                findings.append(
                     Finding(
                         severity=sev,
                         title=f"Fuzz: {path} (HTTP {status}, {size}B)",
@@ -846,198 +828,9 @@ async def run_web_dirfuzz(  # noqa: C901
         logger.warning("Neither feroxbuster nor gobuster found — skipping directory fuzzing")
         raw_parts.append("=== directory fuzzing === SKIPPED (no tool available)")
 
-    findings.extend(stage1_findings)
-
-    # Trigger Stage 2 if adaptive and Stage 1 found directories (excluding basic root redirects)
-    has_meaningful_stage1 = any(
-        f.title.startswith("Fuzz:")
-        and not f.title.startswith("Fuzz: / ")
-        and not f.title.startswith("Fuzz: /rn_404_")
-        for f in stage1_findings
-    )
-
-    if use_adaptive and has_meaningful_stage1 and stage1_wl != wordlist:
-        logger.info(
-            "[web_dirfuzz] Stage 1 found active directories."
-            " Upgrading to Stage 2 (large list: %s)",
-            wordlist,
-        )
-        if shutil.which("feroxbuster"):
-            ferox_out_2 = output_dir / "feroxbuster_stage2.txt"
-            rc2, stdout2, stderr2 = await run_tool(
-                cmd=[
-                    "feroxbuster",
-                    "-u", url,
-                    "-w", wordlist,
-                    "-x", extensions,
-                    "-t", threads,
-                    "--depth", depth,
-                    "--timeout", "7",
-                    "--connect-timeout", "5",
-                    "--dont-filter",
-                    "--filter-code", "429,502,503",
-                    "-q",
-                ],
-                output_file=ferox_out_2,
-                timeout=min(int(config.default_timeout * 1.5), 180),
-            )
-            raw_parts.append(f"=== feroxbuster (Stage 2) ===\n{stdout2[:5000]}")
-
-            if rc2 in (0, 1) and stdout2.strip():
-                for status, found_url, size in _parse_feroxbuster(stdout2):
-                    path = found_url.replace(url, "") or "/"
-                    sev = _severity_for_status(status, path)
-                    findings.append(
-                        Finding(
-                            severity=sev,
-                            title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                            description=f"Discovered path on {url}: {found_url}",
-                            module="web_dirfuzz",
-                            evidence=f"HTTP {status} Size:{size}",
-                        )
-                    )
-
-        elif shutil.which("gobuster"):
-            gobuster_out_2 = output_dir / "gobuster_dir_stage2.txt"
-            rc2, stdout2, stderr2 = await run_tool(
-                cmd=[
-                    "gobuster", "dir",
-                    "-u", url,
-                    "-w", wordlist,
-                    "-x", extensions,
-                    "-t", threads,
-                    "--timeout", "7s",
-                    "-q",
-                ],
-                output_file=gobuster_out_2,
-                timeout=min(int(config.default_timeout * 1.5), 180),
-            )
-            raw_parts.append(f"=== gobuster dir (Stage 2) ===\n{stdout2[:5000]}")
-
-            if rc2 in (0, 1) and stdout2.strip():
-                for status, path, size in _parse_gobuster(stdout2):
-                    sev = _severity_for_status(status, path)
-                    findings.append(
-                        Finding(
-                            severity=sev,
-                            title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                            description=f"Discovered path on {url}: {path}",
-                            module="web_dirfuzz",
-                            evidence=f"HTTP {status} Size:{size}",
-                        )
-                    )
-    elif use_adaptive and not has_meaningful_stage1:
-        logger.info(
-            "[web_dirfuzz] Stage 1 found no active directories."
-            " Skipping Stage 2 to save time."
-        )
-
-    # ------------------------------------------------------------------
-    # 2b. Content wordlist fuzzing — catches pages the directory wordlist
-    #     misses (login, contact, signup, etc.).  The directory wordlist
-    #     (raft-medium-directories) only has folder names; this content
-    #     wordlist (raft-medium-words) includes common page names that
-    #     CTF players need to see.
-    # ------------------------------------------------------------------
-    content_wl = None
-    seclists_base = config.module_toggles.get("_seclists_base")
-    custom_dir = config.module_toggles.get("_custom_dir")
-    if seclists_base:
-        from recon_ninja.utils.wordlists import get_content_wordlist
-        content_wl = get_content_wordlist(seclists_base, custom_dir)
-
-    # Only run content fuzz if we found a different wordlist than the
-    # directory one (avoid redundant scanning with the same wordlist).
-    content_wl_str = str(content_wl) if content_wl and content_wl.is_file() else None
-    if content_wl_str and content_wl_str != stage1_wl and content_wl_str != wordlist:
-        # Deduplicate against already-found paths to avoid noise
-        already_found_paths = {
-            f.title.split(" (HTTP")[0].replace("Fuzz: ", "").replace("Path found: ", "").strip()
-            for f in findings
-            if f.module == "web_dirfuzz" and (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
-        }
-
-        if shutil.which("feroxbuster") and target_reachable:
-            content_out = output_dir / "feroxbuster_content.txt"
-            content_cmd = [
-                "feroxbuster",
-                "-u", url,
-                "-w", content_wl_str,
-                "-x", extensions,
-                "-t", threads,
-                "--timeout", "4",
-                "--connect-timeout", "3",
-                "--dont-filter",
-                "--filter-code", "429,502,503",
-                "--depth", "1",  # shallow — we want pages, not deep recursion
-                "-q",
-            ]
-            try:
-                crc, cstdout, cstderr = await run_tool(
-                    cmd=content_cmd,
-                    output_file=content_out,
-                    timeout=min(int(config.default_timeout * 1.2), 120),  # shorter timeout for content fuzz
-                )
-                raw_parts.append(f"=== feroxbuster (content wordlist) ===\n{cstdout[:5000]}")
-
-                if crc in (0, 1) and cstdout.strip():
-                    for status, found_url, size in _parse_feroxbuster(cstdout):
-                        path = found_url.replace(url, "") or "/"
-                        # Skip already-found paths
-                        path_clean = path.rstrip("/")
-                        if path_clean in already_found_paths or path in already_found_paths:
-                            continue
-                        sev = _severity_for_status(status, path)
-                        findings.append(
-                            Finding(
-                                severity=sev,
-                                title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                                description=f"Discovered page on {url}: {found_url}",
-                                module="web_dirfuzz",
-                                evidence=f"HTTP {status} Size:{size}",
-                            )
-                        )
-            except Exception as exc:
-                logger.debug("[web_dirfuzz] Content wordlist fuzzing failed: %s", exc)
-
-        elif shutil.which("gobuster") and target_reachable:
-            content_out = output_dir / "gobuster_content.txt"
-            try:
-                crc, cstdout, cstderr = await run_tool(
-                    cmd=[
-                        "gobuster", "dir",
-                        "-u", url,
-                        "-w", content_wl_str,
-                        "-x", extensions,
-                        "-t", threads,
-                        "--timeout", "7s",
-                        "-q",
-                    ],
-                    output_file=content_out,
-                    timeout=min(int(config.default_timeout * 1.2), 120),
-                )
-                raw_parts.append(f"=== gobuster (content wordlist) ===\n{cstdout[:5000]}")
-
-                if crc in (0, 1) and cstdout.strip():
-                    for status, path, size in _parse_gobuster(cstdout):
-                        path_clean = path.rstrip("/")
-                        if path_clean in already_found_paths or path in already_found_paths:
-                            continue
-                        sev = _severity_for_status(status, path)
-                        findings.append(
-                            Finding(
-                                severity=sev,
-                                title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                                description=f"Discovered page on {url}: {path}",
-                                module="web_dirfuzz",
-                                evidence=f"HTTP {status} Size:{size}",
-                            )
-                        )
-            except Exception as exc:
-                logger.debug("[web_dirfuzz] Content wordlist gobuster failed: %s", exc)
-
     # ------------------------------------------------------------------
     # 3. Vhost scan — if hostname is known
+    #    Single fast pass with the standard subdomain wordlist, 120s max.
     # ------------------------------------------------------------------
     vhost_hostname = hostname or state.primary_hostname
     # Only run vhost scanning on the primary hostname/domain, not on subdomains
@@ -1048,44 +841,12 @@ async def run_web_dirfuzz(  # noqa: C901
     if vhost_hostname and not is_subdomain_scan:
         vhost_wordlist = str(config.dns_wordlist)
 
-        # Smart adaptive vhost logic
-        use_adaptive_vhost = config.adaptive_fuzz and not config.fast_mode
-        # If passive OSINT found subdomains, we immediately trust the signal and use the full list.
-        # Otherwise, if adaptive is active, we probe with a 5k list first.
-        passive_subdomains_found = any(
-            f.module == "osint" and "subdomain" in f.title.lower()
-            for f in state.all_findings
-        )
-
-        stage1_vhost_wl = vhost_wordlist
-        if use_adaptive_vhost and not passive_subdomains_found:
-            # Resolve small subdomain list
-            from recon_ninja.utils.wordlists import resolve_wordlist
-            seclists_base = config.module_toggles.get("_seclists_base")
-            custom_dir = config.module_toggles.get("_custom_dir")
-            small_dns = (
-                resolve_wordlist(
-                    "Discovery/DNS/subdomains-top1million-5000.txt",
-                    seclists_base, custom_dir,
-                )
-                if seclists_base else None
-            )
-            if small_dns and small_dns.is_file():
-                stage1_vhost_wl = str(small_dns)
-            else:
-                fallback_dns = Path("/usr/share/wordlists/dirb/common.txt")
-                if fallback_dns.is_file():
-                    stage1_vhost_wl = str(fallback_dns)
-
-        stage1_vhost_findings: list[Finding] = []
-
         if shutil.which("gobuster"):
             vhost_out = output_dir / "gobuster_vhost.txt"
-            vhost_url = url
             cmd = [
                 "gobuster", "vhost",
-                "-u", vhost_url,
-                "-w", stage1_vhost_wl,
+                "-u", url,
+                "-w", vhost_wordlist,
                 "--append-domain",
                 "-t", "20",
                 "-q",
@@ -1093,9 +854,9 @@ async def run_web_dirfuzz(  # noqa: C901
             rc, stdout, stderr = await run_tool(
                 cmd=cmd,
                 output_file=vhost_out,
-                timeout=min(int(config.default_timeout * 1.5), 180),
+                timeout=120,
             )
-            raw_parts.append(f"=== gobuster vhost (Stage 1) ===\n{stdout[:3000]}")
+            raw_parts.append(f"=== gobuster vhost ===\n{stdout[:3000]}")
 
             if stdout.strip():
                 for line in stdout.splitlines():
@@ -1135,7 +896,7 @@ async def run_web_dirfuzz(  # noqa: C901
                         elif status_code == "200":
                             vhost_sev = Severity.LOW
 
-                        stage1_vhost_findings.append(
+                        findings.append(
                             Finding(
                                 severity=vhost_sev,
                                 title=clean_title,
@@ -1152,16 +913,16 @@ async def run_web_dirfuzz(  # noqa: C901
                     "ffuf",
                     "-u", url,
                     "-H", f"Host: FUZZ.{vhost_hostname}",
-                    "-w", stage1_vhost_wl,
+                    "-w", vhost_wordlist,
                     "-mc", "200,301,302",
                     "-ac",  # auto-calibrate to filter out baseline noise/size
                     "-o", str(vhost_out),
                     "-of", "json",
                 ],
                 output_file=vhost_out,
-                timeout=min(int(config.default_timeout * 1.5), 180),
+                timeout=120,
             )
-            raw_parts.append(f"=== ffuf vhost (Stage 1) ===\n{stdout[:3000]}")
+            raw_parts.append(f"=== ffuf vhost ===\n{stdout[:3000]}")
 
             if vhost_out.is_file():
                 try:
@@ -1176,7 +937,7 @@ async def run_web_dirfuzz(  # noqa: C901
                         size_found = entry.get("size", 0)
                         if vhost_found:
                             _register_vhost(vhost_found, target, state, config)
-                            stage1_vhost_findings.append(
+                            findings.append(
                                 Finding(
                                     severity=Severity.INFO,
                                     title=(
@@ -1198,145 +959,6 @@ async def run_web_dirfuzz(  # noqa: C901
                             )
                 except Exception as exc:
                     logger.debug("Failed to parse ffuf vhost output: %s", exc)
-
-        findings.extend(stage1_vhost_findings)
-
-        # Trigger Stage 2 vhost brute force if Stage 1 found active virtual hosts
-        if (
-            use_adaptive_vhost
-            and stage1_vhost_findings
-            and stage1_vhost_wl != vhost_wordlist
-        ):
-            logger.info(
-                "[web_dirfuzz] Stage 1 found active virtual hosts."
-                " Upgrading to Stage 2 (large list: %s)",
-                vhost_wordlist,
-            )
-            if shutil.which("gobuster"):
-                vhost_out_2 = output_dir / "gobuster_vhost_stage2.txt"
-                cmd2 = [
-                    "gobuster", "vhost",
-                    "-u", url,
-                    "-w", vhost_wordlist,
-                    "--append-domain",
-                    "-t", "20",
-                    "-q",
-                ]
-                rc2, stdout2, stderr2 = await run_tool(
-                    cmd=cmd2,
-                    output_file=vhost_out_2,
-                    timeout=min(int(config.default_timeout * 1.5), 180),
-                )
-                raw_parts.append(f"=== gobuster vhost (Stage 2) ===\n{stdout2[:3000]}")
-
-                if stdout2.strip():
-                    for line in stdout2.splitlines():
-                        if "Found:" in line or "Status:" in line:
-                            vhost = None
-                            status_code = ""
-                            size = ""
-                            m = re.search(r"Found:\s*([^\s:]+)", line)
-                            if m:
-                                vhost = m.group(1)
-                            else:
-                                parts = line.split()
-                                if parts:
-                                    vhost = parts[0].split(":")[0]
-                            # Try to extract status and size
-                            status_match = re.search(r"Status:\s*(\d+)", line)
-                            if status_match:
-                                status_code = status_match.group(1)
-                            size_match = re.search(r"Size:\s*(\d+)", line)
-                            if size_match:
-                                size = size_match.group(1)
-                            if vhost:
-                                _register_vhost(vhost, target, state, config)
-
-                            title_parts = [f"Vhost found: {vhost}"]
-                            if status_code:
-                                title_parts.append(f"Status: {status_code}")
-                            if size:
-                                title_parts.append(f"Size: {size}")
-                            clean_title = " ".join(title_parts)
-
-                            vhost_sev = Severity.INFO
-                            if status_code == "401":
-                                vhost_sev = Severity.MEDIUM
-                            elif status_code == "200":
-                                vhost_sev = Severity.LOW
-
-                            findings.append(
-                                Finding(
-                                    severity=vhost_sev,
-                                    title=clean_title,
-                                    description=f"Virtual host discovered on {url}",
-                                    module="web_dirfuzz",
-                                    evidence=line.strip(),
-                                )
-                            )
-
-            elif shutil.which("ffuf"):
-                vhost_out_2 = output_dir / "ffuf_vhost_stage2.json"
-                rc2, stdout2, stderr2 = await run_tool(
-                    cmd=[
-                        "ffuf",
-                        "-u", url,
-                        "-H", f"Host: FUZZ.{vhost_hostname}",
-                        "-w", vhost_wordlist,
-                        "-mc", "200,301,302",
-                        "-ac",
-                        "-o", str(vhost_out_2),
-                        "-of", "json",
-                    ],
-                    output_file=vhost_out_2,
-                    timeout=min(int(config.default_timeout * 1.5), 180),
-                )
-                raw_parts.append(f"=== ffuf vhost (Stage 2) ===\n{stdout2[:3000]}")
-
-                if vhost_out_2.is_file():
-                    try:
-                        ffuf_data2 = json.loads(
-                            vhost_out_2.read_text(
-                                encoding="utf-8", errors="replace"
-                            )
-                        )
-                        for entry in ffuf_data2.get("results", []):
-                            vhost_found = entry.get("host", "")
-                            status_found = entry.get("status", 0)
-                            size_found = entry.get("size", 0)
-                            if vhost_found:
-                                _register_vhost(vhost_found, target, state, config)
-                                findings.append(
-                                    Finding(
-                                        severity=Severity.INFO,
-                                        title=(
-                                            f"Vhost found: {vhost_found}"
-                                            f" (HTTP {status_found},"
-                                            f" {size_found}B)"
-                                        ),
-                                        description=(
-                                            f"Virtual host discovered on"
-                                            f" {url}: {vhost_found}"
-                                        ),
-                                        module="web_dirfuzz",
-                                        evidence=(
-                                            f"Host: {vhost_found}"
-                                            f" Status: {status_found}"
-                                            f" Size: {size_found}"
-                                        ),
-                                    )
-                                )
-                    except Exception as exc:
-                        logger.debug("Failed to parse ffuf vhost output: %s", exc)
-        elif (
-            use_adaptive_vhost
-            and not stage1_vhost_findings
-            and not passive_subdomains_found
-        ):
-            logger.info(
-                "[web_dirfuzz] Stage 1 found no active virtual hosts."
-                " Skipping Stage 2 to save time."
-            )
     else:
         logger.debug("No hostname known or subdomain scan — skipping vhost scan")
 
