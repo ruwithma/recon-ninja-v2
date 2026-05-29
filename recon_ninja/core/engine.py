@@ -365,9 +365,10 @@ class ReconEngine:
 
         if rc != 0 and not xml_out.exists():
             logger.error("Deep scan failed (rc=%d) and no XML output", rc)
-            return
-
-        if xml_out.exists():
+            # Don't return immediately — still create fallback services
+            # and classify the box so Phase 3 can proceed.
+            parsed_hostnames = []
+        elif xml_out.exists():
             services, parsed_hostnames = parse_nmap_xml(xml_out)
             self.state.services.update(services)
             logger.info("Parsed %d services from deep scan XML", len(services))
@@ -378,6 +379,17 @@ class ReconEngine:
         else:
             logger.warning("XML output file not found after deep scan")
             parsed_hostnames = []
+
+        # Fallback: if nmap XML parsing failed or returned no services,
+        # but Phase 1 discovered open ports, create basic ServiceInfo
+        # entries so that the port table displays correctly and Phase 3
+        # modules can identify which services to target.
+        if not self.state.services and self.state.open_ports:
+            logger.warning(
+                "nmap deep scan produced no service entries — "
+                "creating fallback entries from Phase 1 open ports"
+            )
+            self._create_fallback_services()
 
         # Detect hostnames from service info
         for svc in self.state.services.values():
@@ -1468,6 +1480,77 @@ class ReconEngine:
     # ------------------------------------------------------------------
     # Script-based service supplementation
     # ------------------------------------------------------------------
+
+    def _create_fallback_services(self) -> None:
+        """Create basic ServiceInfo entries from known open ports.
+
+        Called when the nmap deep scan XML parsing fails or returns no
+        services, but Phase 1 (RustScan / nmap fast scan) already
+        discovered open ports.  Without this fallback the port table
+        shows "No open ports discovered" and Phase 3 modules may not
+        trigger correctly.
+
+        Common port → service name mappings are used to populate the
+        ``service`` field so that downstream code (e.g. ``_classify_box``,
+        ``_determine_modules``) can make reasonable decisions.
+        """
+        _COMMON_PORTS: dict[int, str] = {
+            21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp",
+            53: "dns", 80: "http", 110: "pop3", 111: "rpcbind",
+            135: "msrpc", 139: "netbios-ssn", 143: "imap",
+            389: "ldap", 443: "https", 445: "microsoft-ds",
+            993: "imaps", 995: "pop3s", 1433: "ms-sql-s",
+            3306: "mysql", 3389: "ms-wbt-server", 5432: "postgresql",
+            5900: "vnc", 5985: "wsman", 5986: "wsmans",
+            6379: "redis", 8080: "http-proxy", 8443: "https-alt",
+            27017: "mongodb",
+        }
+
+        # Also try to infer service names from nmap deep scan text output
+        text_out = self.output_dir / "nmap_deep.txt"
+        text_services: dict[int, tuple[str, str, str]] = {}  # port → (service, product, version)
+        if text_out.exists():
+            import re as _re
+            # Match lines like: "22/tcp  open  ssh     OpenSSH 8.9p1"
+            _NMAP_TEXT_RE = _re.compile(
+                r"^(\d+)/(tcp|udp)\s+open\s+(\S+)\s+(.*?)$", _re.MULTILINE
+            )
+            try:
+                content = text_out.read_text(encoding="utf-8", errors="replace")
+                for m in _NMAP_TEXT_RE.finditer(content):
+                    port_num = int(m.group(1))
+                    svc_name = m.group(3).strip()
+                    product_ver = m.group(4).strip()
+                    # Split product and version at the first space if possible
+                    parts = product_ver.split(None, 1)
+                    product = parts[0] if parts else ""
+                    version = parts[1] if len(parts) > 1 else ""
+                    text_services[port_num] = (svc_name, product, version)
+            except Exception:
+                logger.debug("Failed to parse nmap_deep.txt for fallback services")
+
+        for port in self.state.open_ports:
+            if port in self.state.services:
+                continue  # Already have service info for this port
+
+            # Prefer text output if available, then common port map
+            if port in text_services:
+                svc_name, product, version = text_services[port]
+            else:
+                svc_name = _COMMON_PORTS.get(port, "unknown")
+                product = ""
+                version = ""
+
+            info = ServiceInfo(
+                port=port,
+                proto="tcp",
+                state="open",
+                service=svc_name,
+                product=product,
+                version=version,
+            )
+            self.state.services[port] = info
+            logger.debug("Created fallback ServiceInfo for port %d: %s", port, svc_name)
 
     @staticmethod
     def _supplement_scripts(services: dict[int, ServiceInfo]) -> None:
