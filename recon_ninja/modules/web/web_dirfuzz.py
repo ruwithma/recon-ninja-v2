@@ -713,14 +713,81 @@ async def run_web_dirfuzz(  # noqa: C901
             else:
                 ferox_cmd.extend(["--depth", depth])
 
-            # Give feroxbuster 1.5× the default timeout — directory
-            # fuzzing is inherently slower than single-command tools.
-            ferox_timeout = int(config.default_timeout * 1.5)
-            rc, stdout, stderr = await run_tool(
-                cmd=ferox_cmd,
-                output_file=ferox_out,
-                timeout=ferox_timeout,
+            # Cap feroxbuster at 180s for CTF use — 7+ minute hangs
+            # are unacceptable.  Most CTF directories are found in the
+            # first 2 minutes of scanning.
+            ferox_timeout = min(int(config.default_timeout * 1.5), 180)
+
+            # Stream feroxbuster output so paths appear in REAL-TIME
+            # instead of waiting for the entire scan to finish silently.
+            from recon_ninja.core.runner import run_tool_streaming
+            from recon_ninja.core.display import get_console
+
+            collected_lines: list[str] = []
+            live_findings_count = 0
+            _stream_pattern = re.compile(
+                r"^(\d{3})\s+\w+\s+\d+[a-zA-Z]?\s+\d+[a-zA-Z]?\s+(\d+)[a-zA-Z]?\s+(https?://\S+)$"
             )
+            _stream_pattern_short = re.compile(
+                r"^(\d{3})\s+\w+\s+(\d+)[a-zA-Z]?\s+(https?://\S+)$"
+            )
+            _seen_stream_urls: set[str] = set()
+            console = get_console()
+
+            try:
+                async for line in run_tool_streaming(
+                    cmd=ferox_cmd,
+                    output_file=ferox_out,
+                    timeout=ferox_timeout,
+                ):
+                    collected_lines.append(line)
+                    # Check if this line is a discovered path
+                    match = _stream_pattern.match(line) or _stream_pattern_short.match(line)
+                    if match:
+                        status_code = match.group(1)
+                        found_url = match.group(3) if _stream_pattern.match(line) else match.group(3)
+                        if found_url not in _seen_stream_urls:
+                            _seen_stream_urls.add(found_url)
+                            live_findings_count += 1
+                            # Print discovered path immediately!
+                            path = found_url.replace(url, "") or "/"
+                            if status_code.startswith("2"):
+                                console.print(
+                                    f"      [bold green]✓[/] [bold]{path}[/]"
+                                    f" [dim](HTTP {status_code})[/]"
+                                )
+                            elif status_code.startswith("3"):
+                                console.print(
+                                    f"      [cyan]→[/] [bold]{path}[/]"
+                                    f" [dim](HTTP {status_code})[/]"
+                                )
+                            elif status_code == "401":
+                                console.print(
+                                    f"      [bold yellow]🔐[/] [bold]{path}[/]"
+                                    f" [dim](HTTP {status_code} — auth required!)[/]"
+                                )
+                            elif status_code == "403":
+                                console.print(
+                                    f"      [yellow]⊘[/] [bold]{path}[/]"
+                                    f" [dim](HTTP {status_code} — forbidden)[/]"
+                                )
+                            else:
+                                console.print(
+                                    f"      [dim]•[/] [bold]{path}[/]"
+                                    f" [dim](HTTP {status_code})[/]"
+                                )
+            except Exception as exc:
+                logger.warning("[web_dirfuzz] feroxbuster streaming failed: %s", exc)
+                # Fallback to non-streaming if streaming fails
+                rc, stdout, stderr = await run_tool(
+                    cmd=ferox_cmd,
+                    output_file=ferox_out,
+                    timeout=ferox_timeout,
+                )
+                collected_lines = stdout.splitlines()
+
+            # Reconstruct stdout from collected lines for parsing below
+            stdout = "\n".join(collected_lines)
             raw_parts.append(
                 f"=== feroxbuster (Stage 1) ===\n{stdout[:5000]}"
             )
@@ -759,7 +826,7 @@ async def run_web_dirfuzz(  # noqa: C901
                 "-q",
             ],
             output_file=gobuster_out,
-            timeout=int(config.default_timeout * 1.5),
+            timeout=min(int(config.default_timeout * 1.5), 180),
         )
         raw_parts.append(f"=== gobuster dir (Stage 1) ===\n{stdout[:5000]}")
 
@@ -812,7 +879,7 @@ async def run_web_dirfuzz(  # noqa: C901
                     "-q",
                 ],
                 output_file=ferox_out_2,
-                timeout=int(config.default_timeout * 1.5),
+                timeout=min(int(config.default_timeout * 1.5), 180),
             )
             raw_parts.append(f"=== feroxbuster (Stage 2) ===\n{stdout2[:5000]}")
 
@@ -843,7 +910,7 @@ async def run_web_dirfuzz(  # noqa: C901
                     "-q",
                 ],
                 output_file=gobuster_out_2,
-                timeout=int(config.default_timeout * 1.5),
+                timeout=min(int(config.default_timeout * 1.5), 180),
             )
             raw_parts.append(f"=== gobuster dir (Stage 2) ===\n{stdout2[:5000]}")
 
@@ -909,7 +976,7 @@ async def run_web_dirfuzz(  # noqa: C901
                 crc, cstdout, cstderr = await run_tool(
                     cmd=content_cmd,
                     output_file=content_out,
-                    timeout=int(config.default_timeout * 1.2),  # shorter timeout for content fuzz
+                    timeout=min(int(config.default_timeout * 1.2), 120),  # shorter timeout for content fuzz
                 )
                 raw_parts.append(f"=== feroxbuster (content wordlist) ===\n{cstdout[:5000]}")
 
@@ -947,7 +1014,7 @@ async def run_web_dirfuzz(  # noqa: C901
                         "-q",
                     ],
                     output_file=content_out,
-                    timeout=int(config.default_timeout * 1.2),
+                    timeout=min(int(config.default_timeout * 1.2), 120),
                 )
                 raw_parts.append(f"=== gobuster (content wordlist) ===\n{cstdout[:5000]}")
 
@@ -1026,7 +1093,7 @@ async def run_web_dirfuzz(  # noqa: C901
             rc, stdout, stderr = await run_tool(
                 cmd=cmd,
                 output_file=vhost_out,
-                timeout=int(config.default_timeout * 1.5),
+                timeout=min(int(config.default_timeout * 1.5), 180),
             )
             raw_parts.append(f"=== gobuster vhost (Stage 1) ===\n{stdout[:3000]}")
 
@@ -1092,7 +1159,7 @@ async def run_web_dirfuzz(  # noqa: C901
                     "-of", "json",
                 ],
                 output_file=vhost_out,
-                timeout=int(config.default_timeout * 1.5),
+                timeout=min(int(config.default_timeout * 1.5), 180),
             )
             raw_parts.append(f"=== ffuf vhost (Stage 1) ===\n{stdout[:3000]}")
 
@@ -1158,7 +1225,7 @@ async def run_web_dirfuzz(  # noqa: C901
                 rc2, stdout2, stderr2 = await run_tool(
                     cmd=cmd2,
                     output_file=vhost_out_2,
-                    timeout=int(config.default_timeout * 1.5),
+                    timeout=min(int(config.default_timeout * 1.5), 180),
                 )
                 raw_parts.append(f"=== gobuster vhost (Stage 2) ===\n{stdout2[:3000]}")
 
@@ -1222,7 +1289,7 @@ async def run_web_dirfuzz(  # noqa: C901
                         "-of", "json",
                     ],
                     output_file=vhost_out_2,
-                    timeout=int(config.default_timeout * 1.5),
+                    timeout=min(int(config.default_timeout * 1.5), 180),
                 )
                 raw_parts.append(f"=== ffuf vhost (Stage 2) ===\n{stdout2[:3000]}")
 
