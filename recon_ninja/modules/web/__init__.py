@@ -69,7 +69,7 @@ def _print_fast_findings(findings: list[Finding], port: int, category: str) -> N
     # — these are CRITICAL for CTF players
     dir_findings = [
         f for f in findings
-        if f.title.startswith("Fuzz:") or f.title.startswith("Path found:")
+        if (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
         and f.severity == Severity.LOW
     ]
     for f in dir_findings[:10]:
@@ -196,10 +196,14 @@ async def _scan_port(
                 f"[bold cyan]{len(dir_findings)}[/] directories/files"
             )
             sorted_dirs = sorted(dir_findings, key=lambda f: f.severity.rank)
-            for f in sorted_dirs[:10]:
+            for f in sorted_dirs[:20]:
                 sev_style = f.severity.rich_style
                 console.print(
                     f"      [{sev_style}]•[/] {f.title}"
+                )
+            if len(sorted_dirs) > 20:
+                console.print(
+                    f"      [dim]... and {len(sorted_dirs) - 20} more[/]"
                 )
         if vhost_findings:
             console.print(

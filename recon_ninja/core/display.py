@@ -544,27 +544,56 @@ def display_findings_panel(findings: list[Finding]) -> None:  # noqa: C901
             if not is_redundant:
                 lines.append(f"    [dim]{desc}[/]")
 
-    # Collapse INFO findings into a single summary line
+    # Collapse INFO findings into a single summary line,
+    # BUT always show directory/path findings explicitly since CTF players
+    # need to see them at a glance.
     if info_findings:
         info_count = len(info_findings)
-        # Group by category for a cleaner summary
-        categories: dict[str, int] = {}
-        for f in info_findings:
-            # Extract category from title
-            cat = f.title.split(":")[0] if ":" in f.title else "Other"
-            categories[cat] = categories.get(cat, 0) + 1
 
-        lines.append(
-            f"  [dim][INFO] INFO ({info_count} findings)[/]"
-        )
-        lines.append(f"  [{'─' * 40}]")
-        cat_parts = [f"{cat} ({cnt})" for cat, cnt in sorted(categories.items())]
-        lines.append(
-            f"    [dim]{', '.join(cat_parts[:8])}[/]"
-        )
-        lines.append(
-            "    [dim]See full report for details[/]"
-        )
+        # Separate directory/path findings from other INFO — these are
+        # the most actionable findings for CTF players and must not be
+        # hidden behind a collapsed summary.
+        dir_info_findings = [
+            f for f in info_findings
+            if f.module == "web_dirfuzz"
+            and (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
+        ]
+        other_info_findings = [
+            f for f in info_findings
+            if f not in dir_info_findings
+        ]
+
+        # Show directory findings explicitly (up to 15)
+        if dir_info_findings:
+            lines.append(
+                f"  [bold bright_green][DIR] DISCOVERED PATHS ({len(dir_info_findings)} findings)[/]"
+            )
+            lines.append(f"  [{'─' * 40}]")
+            for f in sorted(dir_info_findings, key=lambda x: x.title)[:15]:
+                lines.append(f"    [bright_green]•[/] {f.title}")
+            if len(dir_info_findings) > 15:
+                lines.append(
+                    f"    [dim]... and {len(dir_info_findings) - 15} more — see full report[/]"
+                )
+
+        # Collapse remaining INFO findings into a summary line
+        if other_info_findings:
+            categories: dict[str, int] = {}
+            for f in other_info_findings:
+                cat = f.title.split(":")[0] if ":" in f.title else "Other"
+                categories[cat] = categories.get(cat, 0) + 1
+
+            lines.append(
+                f"  [dim][INFO] INFO ({len(other_info_findings)} findings)[/]"
+            )
+            lines.append(f"  [{'─' * 40}]")
+            cat_parts = [f"{cat} ({cnt})" for cat, cnt in sorted(categories.items())]
+            lines.append(
+                f"    [dim]{', '.join(cat_parts[:8])}[/]"
+            )
+            lines.append(
+                "    [dim]See full report for details[/]"
+            )
 
     content = "\n".join(lines)
     panel = Panel(
@@ -769,8 +798,12 @@ def display_scan_summary(state: ScanState) -> None:
     if dirfuzz_findings or vhost_findings:
         display_discovered_paths(dirfuzz_findings, vhost_findings)
 
-    # --- Exploit results ---
-    exploit_findings = [f for f in state.all_findings if f.module == "vuln_correlate"]
+    # --- Exploit results (from both Phase 3 web module and Phase 5 vuln_correlate) ---
+    exploit_findings = [
+        f for f in state.all_findings
+        if f.module == "vuln_correlate"
+        or (f.module == "web" and ("exploit" in f.title.lower() or "Exploits" in f.title))
+    ]
     if exploit_findings:
         display_exploit_results(exploit_findings)
 
@@ -1149,21 +1182,12 @@ def display_exploit_results(findings: list[Finding]) -> None:
 
     console = get_console()
 
-    table = Table(
-        title="[bold bright_red] EXPLOIT RESULTS [/]",
-        show_header=True,
-        header_style="bold white",
-        border_style="red",
-        title_style="bold bright_red",
-    )
-    table.add_column("Query", style="bold", min_width=16)
-    table.add_column("Count", justify="right", width=6)
-    table.add_column("Top Exploits", min_width=40)
-
+    # Use a panel with structured output instead of a cramped table,
+    # so exploit titles don't get truncated.
+    lines: list[str] = []
     import re as _re
+
     for f in findings:
-        # Parse: "Exploits found: searchsploit-22 (3 results)"
-        # or: "Exploits (broad): Nginx (5 results)"
         title = f.title
         count_match = _re.search(r"\((\d+)\s+results?\)", title)
         count = count_match.group(1) if count_match else "?"
@@ -1179,17 +1203,51 @@ def display_exploit_results(findings: list[Finding]) -> None:
                 query = broad_match.group(1)
 
         # Get top exploits from description
-        top = ""
+        top_exploits: list[str] = []
         top_match = _re.search(r"Top results?:\s*(.+)", f.description or "")
         if top_match:
-            top = top_match.group(1)[:100]
+            # Split comma-separated titles into individual items
+            raw_top = top_match.group(1)
+            for item in raw_top.split(", "):
+                item = item.strip()
+                if item:
+                    top_exploits.append(item)
 
+        is_broad = "broad" in title.lower()
+        query_display = query or title[:50]
         sev_style = f.severity.rich_style if hasattr(f.severity, "rich_style") else "white"
-        table.add_row(
-            query or title[:40],
-            f"[{sev_style}]{count}[/]",
-            top or f.description[:80] if f.description else "—",
-        )
 
-    console.print(table)
+        if is_broad:
+            lines.append(
+                f"  [{sev_style}]⚔[/] [bold]{query_display}[/]"
+                f" — [dim]no version-specific exploits, but[/]"
+                f" [bold cyan]{count}[/] [dim]found for broader query[/]"
+            )
+        else:
+            lines.append(
+                f"  [{sev_style}]⚔[/] [bold]{query_display}[/]"
+                f" — [bold cyan]{count}[/] [dim]exploits found[/]"
+            )
+
+        for i, exploit in enumerate(top_exploits[:5]):
+            prefix = "    ├─" if i < min(len(top_exploits), 5) - 1 else "    └─"
+            lines.append(f"  [dim]{prefix}[/] {exploit}")
+
+        if len(top_exploits) > 5:
+            lines.append(f"  [dim]    └─ ... and {len(top_exploits) - 5} more[/]")
+
+        lines.append("")  # blank line between entries
+
+    # Remove trailing blank line
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    content = "\n".join(lines)
+    panel = Panel(
+        content,
+        title="[bold bright_red] EXPLOIT RESULTS [/]",
+        border_style="bold red",
+        padding=(1, 2),
+    )
+    console.print(panel)
     console.print()

@@ -45,26 +45,104 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 #: Common sensitive paths to probe with HEAD requests.
+#: Includes both security-sensitive paths AND common CTF web pages
+#: that CTF players need to see immediately.
 COMMON_PATHS: list[tuple[str, Severity]] = [
-    ("/", Severity.INFO),                  # baseline — not usually a finding
+    # --- Baseline (not usually a finding) ---
+    ("/", Severity.INFO),
+
+    # --- High-value security paths ---
     ("/.git/", Severity.HIGH),             # git repository exposure
     ("/.git/HEAD", Severity.HIGH),         # git HEAD file
+    ("/.git/config", Severity.HIGH),       # git config
     ("/.env", Severity.CRITICAL),          # environment file leak
-    ("/admin", Severity.LOW),              # admin panel
-    ("/admin/", Severity.LOW),
-    ("/api/", Severity.INFO),              # API root
-    ("/swagger.json", Severity.MEDIUM),    # OpenAPI spec
-    ("/graphql", Severity.MEDIUM),         # GraphQL endpoint
-    ("/backup/", Severity.MEDIUM),         # backup directory
+    ("/.env.bak", Severity.CRITICAL),      # environment backup
     ("/config.php.bak", Severity.HIGH),    # PHP config backup
-    ("/web.config", Severity.MEDIUM),      # IIS config
     ("/.htaccess", Severity.LOW),          # Apache config
     ("/.htpasswd", Severity.HIGH),         # Apache password file
+    ("/web.config", Severity.MEDIUM),      # IIS config
+
+    # --- Admin / auth pages (CTF gold) ---
+    ("/admin", Severity.LOW),
+    ("/admin/", Severity.LOW),
+    ("/admin/login", Severity.MEDIUM),
+    ("/login", Severity.LOW),
+    ("/login/", Severity.LOW),
+    ("/signin", Severity.LOW),
+    ("/register", Severity.LOW),
+    ("/signup", Severity.LOW),
+    ("/dashboard", Severity.LOW),
+    ("/dashboard/", Severity.LOW),
+    ("/console", Severity.MEDIUM),         # admin console
+
+    # --- Common CTF web pages ---
+    ("/contact", Severity.INFO),
+    ("/contact/", Severity.INFO),
+    ("/about", Severity.INFO),
+    ("/about/", Severity.INFO),
+    ("/profile", Severity.INFO),
+    ("/profile/", Severity.INFO),
+    ("/settings", Severity.INFO),
+    ("/settings/", Severity.INFO),
+    ("/home", Severity.INFO),
+    ("/home/", Severity.INFO),
+    ("/search", Severity.INFO),
+    ("/upload", Severity.MEDIUM),          # upload endpoints are interesting
+    ("/upload/", Severity.MEDIUM),
+    ("/uploads/", Severity.MEDIUM),
+    ("/download", Severity.INFO),
+    ("/logout", Severity.INFO),
+    ("/forgot-password", Severity.INFO),
+    ("/reset-password", Severity.INFO),
+    ("/change-password", Severity.INFO),
+
+    # --- API / service endpoints ---
+    ("/api/", Severity.INFO),
+    ("/api/v1/", Severity.INFO),
+    ("/api/v2/", Severity.INFO),
+    ("/swagger.json", Severity.MEDIUM),    # OpenAPI spec
+    ("/swagger-ui/", Severity.MEDIUM),     # Swagger UI
+    ("/api-docs", Severity.MEDIUM),        # API docs
+    ("/graphql", Severity.MEDIUM),         # GraphQL endpoint
+    ("/graphiql", Severity.MEDIUM),        # GraphiQL IDE
+
+    # --- Server info / debug paths ---
     ("/server-status", Severity.LOW),      # Apache server-status
+    ("/server-info", Severity.LOW),        # Apache server-info
     ("/phpinfo.php", Severity.MEDIUM),     # PHP info page
+    ("/debug", Severity.MEDIUM),           # debug endpoint
+    ("/debug/", Severity.MEDIUM),
+    ("/actuator", Severity.MEDIUM),        # Spring Boot actuator
+    ("/actuator/", Severity.MEDIUM),
+    ("/actuator/health", Severity.INFO),   # Spring Boot health
+    ("/actuator/env", Severity.HIGH),      # Spring Boot env
+
+    # --- Backup / config directories ---
+    ("/backup/", Severity.MEDIUM),
+    ("/backups/", Severity.MEDIUM),
+    ("/config/", Severity.MEDIUM),
+    ("/conf/", Severity.MEDIUM),
+    ("/db/", Severity.MEDIUM),
+    ("/database/", Severity.MEDIUM),
+
+    # --- CMS-specific paths ---
     ("/wp-login.php", Severity.INFO),      # WordPress login
     ("/wp-admin/", Severity.INFO),         # WordPress admin
+    ("/wp-content/", Severity.INFO),       # WordPress content
+    ("/wp-json/", Severity.INFO),          # WordPress REST API
+
+    # --- Static / misc ---
     ("/robots.txt", Severity.INFO),        # robots (already in core, but check here too)
+    ("/sitemap.xml", Severity.INFO),       # sitemap
+    ("/favicon.ico", Severity.INFO),       # favicon
+    ("/static/", Severity.INFO),           # static files
+    ("/assets/", Severity.INFO),           # assets
+    ("/public/", Severity.INFO),           # public dir
+    ("/media/", Severity.INFO),            # media files
+    ("/images/", Severity.INFO),           # images
+    ("/css/", Severity.INFO),              # stylesheets
+    ("/js/", Severity.INFO),               # javascript
+    ("/fonts/", Severity.INFO),            # fonts
 ]
 
 #: Extension sets keyed by technology stack.
@@ -560,6 +638,7 @@ async def run_web_dirfuzz(  # noqa: C901
 
     stage1_wl = str(small_wl) if use_adaptive else wordlist
     stage1_findings: list[Finding] = []
+    target_reachable = True  # default optimistic; set by preflight check
 
     if shutil.which("feroxbuster"):
         ferox_out = output_dir / "feroxbuster.txt"
@@ -785,6 +864,110 @@ async def run_web_dirfuzz(  # noqa: C901
             "[web_dirfuzz] Stage 1 found no active directories."
             " Skipping Stage 2 to save time."
         )
+
+    # ------------------------------------------------------------------
+    # 2b. Content wordlist fuzzing — catches pages the directory wordlist
+    #     misses (login, contact, signup, etc.).  The directory wordlist
+    #     (raft-medium-directories) only has folder names; this content
+    #     wordlist (raft-medium-words) includes common page names that
+    #     CTF players need to see.
+    # ------------------------------------------------------------------
+    content_wl = None
+    seclists_base = config.module_toggles.get("_seclists_base")
+    custom_dir = config.module_toggles.get("_custom_dir")
+    if seclists_base:
+        from recon_ninja.utils.wordlists import get_content_wordlist
+        content_wl = get_content_wordlist(seclists_base, custom_dir)
+
+    # Only run content fuzz if we found a different wordlist than the
+    # directory one (avoid redundant scanning with the same wordlist).
+    content_wl_str = str(content_wl) if content_wl and content_wl.is_file() else None
+    if content_wl_str and content_wl_str != stage1_wl and content_wl_str != wordlist:
+        # Deduplicate against already-found paths to avoid noise
+        already_found_paths = {
+            f.title.split(" (HTTP")[0].replace("Fuzz: ", "").replace("Path found: ", "").strip()
+            for f in findings
+            if f.module == "web_dirfuzz" and (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
+        }
+
+        if shutil.which("feroxbuster") and target_reachable:
+            content_out = output_dir / "feroxbuster_content.txt"
+            content_cmd = [
+                "feroxbuster",
+                "-u", url,
+                "-w", content_wl_str,
+                "-x", extensions,
+                "-t", threads,
+                "--timeout", "4",
+                "--connect-timeout", "3",
+                "--dont-filter",
+                "--filter-code", "429,502,503",
+                "--depth", "1",  # shallow — we want pages, not deep recursion
+                "-q",
+            ]
+            try:
+                crc, cstdout, cstderr = await run_tool(
+                    cmd=content_cmd,
+                    output_file=content_out,
+                    timeout=int(config.default_timeout * 1.2),  # shorter timeout for content fuzz
+                )
+                raw_parts.append(f"=== feroxbuster (content wordlist) ===\n{cstdout[:5000]}")
+
+                if crc in (0, 1) and cstdout.strip():
+                    for status, found_url, size in _parse_feroxbuster(cstdout):
+                        path = found_url.replace(url, "") or "/"
+                        # Skip already-found paths
+                        path_clean = path.rstrip("/")
+                        if path_clean in already_found_paths or path in already_found_paths:
+                            continue
+                        sev = _severity_for_status(status, path)
+                        findings.append(
+                            Finding(
+                                severity=sev,
+                                title=f"Fuzz: {path} (HTTP {status}, {size}B)",
+                                description=f"Discovered page on {url}: {found_url}",
+                                module="web_dirfuzz",
+                                evidence=f"HTTP {status} Size:{size}",
+                            )
+                        )
+            except Exception as exc:
+                logger.debug("[web_dirfuzz] Content wordlist fuzzing failed: %s", exc)
+
+        elif shutil.which("gobuster") and target_reachable:
+            content_out = output_dir / "gobuster_content.txt"
+            try:
+                crc, cstdout, cstderr = await run_tool(
+                    cmd=[
+                        "gobuster", "dir",
+                        "-u", url,
+                        "-w", content_wl_str,
+                        "-x", extensions,
+                        "-t", threads,
+                        "--timeout", "7s",
+                        "-q",
+                    ],
+                    output_file=content_out,
+                    timeout=int(config.default_timeout * 1.2),
+                )
+                raw_parts.append(f"=== gobuster (content wordlist) ===\n{cstdout[:5000]}")
+
+                if crc in (0, 1) and cstdout.strip():
+                    for status, path, size in _parse_gobuster(cstdout):
+                        path_clean = path.rstrip("/")
+                        if path_clean in already_found_paths or path in already_found_paths:
+                            continue
+                        sev = _severity_for_status(status, path)
+                        findings.append(
+                            Finding(
+                                severity=sev,
+                                title=f"Fuzz: {path} (HTTP {status}, {size}B)",
+                                description=f"Discovered page on {url}: {path}",
+                                module="web_dirfuzz",
+                                evidence=f"HTTP {status} Size:{size}",
+                            )
+                        )
+            except Exception as exc:
+                logger.debug("[web_dirfuzz] Content wordlist gobuster failed: %s", exc)
 
     # ------------------------------------------------------------------
     # 3. Vhost scan — if hostname is known

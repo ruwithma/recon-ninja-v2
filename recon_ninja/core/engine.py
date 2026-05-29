@@ -936,9 +936,13 @@ class ReconEngine:
                         f.module = "vuln_correlate"
                         self.state.add_finding(f)
 
-        # Display exploit results prominently
+        # Display exploit results prominently (from both web module and vuln_correlate)
         if not self.quiet:
-            exploit_findings = [f for f in self.state.all_findings if f.module == "vuln_correlate"]
+            exploit_findings = [
+                f for f in self.state.all_findings
+                if f.module == "vuln_correlate"
+                or (f.module == "web" and ("exploit" in f.title.lower() or "Exploits" in f.title))
+            ]
             if exploit_findings:
                 from recon_ninja.core.display import display_exploit_results
                 display_exploit_results(exploit_findings)
