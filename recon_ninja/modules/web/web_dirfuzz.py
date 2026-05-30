@@ -27,6 +27,7 @@ import re
 import shutil
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from recon_ninja.core.models import (
     Finding,
@@ -43,6 +44,42 @@ from recon_ninja.utils.network import is_root
 from recon_ninja.utils.wordlists import get_dir_small_wordlist, resolve_wordlist
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# URL cleaning helper
+# ---------------------------------------------------------------------------
+
+
+def _clean_url(url: str) -> str:
+    """Remove default ports (:80 for HTTP, :443 for HTTPS) from a URL.
+
+    Many tools (feroxbuster, gobuster, curl) include ``:80`` in their output
+    even though browsers and curl redirect such URLs to the bare hostname.
+    This produces clean, browser-friendly URLs for findings and display.
+
+    Parameters
+    ----------
+    url:
+        A fully-qualified URL, e.g. ``http://silentium.htb:80/admin``.
+
+    Returns
+    -------
+    str
+        URL with default port removed, e.g. ``http://silentium.htb/admin``.
+    """
+    try:
+        parts = urlsplit(url)
+        if parts.scheme == "http" and parts.port == 80:
+            netloc = parts.hostname or parts.netloc.split(":")[0]
+            return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+        if parts.scheme == "https" and parts.port == 443:
+            netloc = parts.hostname or parts.netloc.split(":")[0]
+            return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        pass
+    return url
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -352,7 +389,7 @@ async def _check_path(  # noqa: C901
     Finding | None
         A finding if the path responded with a non-404 status, else None.
     """
-    full_url = f"{url}{path}"
+    full_url = _clean_url(f"{url}{path}")
     try:
         status, redirect_url, size = await _head_status(url, path)
         if status is None:
@@ -431,21 +468,35 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
                 " %s -> %s in /etc/hosts",
                 target, vhost,
             )
-            get_console().print(
-                f"    [bold green][+][/] Auto-added "
-                f"[bold cyan]{vhost}[/] -> {target} "
-                f"in /etc/hosts"
+            # Prominent announcement — CTF players MUST see this!
+            console = get_console()
+            console.print()
+            console.print(
+                f"    [bold black on bright_green] VHOST ADDED TO /etc/hosts [/]"
+                f" [bold cyan]{vhost}[/] -> {target}"
             )
+            console.print(
+                f"    [bold green]>>>[/] Browse: "
+                f"[bold white on blue] http://{vhost} [/]"
+            )
+            console.print()
     elif not already_mapped:
         # Not auto-added — print a clear hint for the user
-        get_console().print(
-            f"    [bold yellow][!][/] Vhost [bold cyan]{vhost}[/]"
-            f" found but not in /etc/hosts"
+        console = get_console()
+        console.print()
+        console.print(
+            f"    [bold black on yellow] VHOST FOUND — ADD TO /etc/hosts [/]"
+            f" [bold cyan]{vhost}[/]"
         )
-        get_console().print(
-            f"        [dim]Add it:[/]"
-            f" [bold]echo \"{target} {vhost}\" | sudo tee -a /etc/hosts[/]"
+        console.print(
+            f"    [bold yellow]>>>[/] Run: "
+            f"[bold]echo \"{target} {vhost}\" | sudo tee -a /etc/hosts[/]"
         )
+        console.print(
+            f"    [bold yellow]>>>[/] Then browse: "
+            f"[bold white on blue] http://{vhost} [/]"
+        )
+        console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -621,7 +672,11 @@ async def run_web_dirfuzz(  # noqa: C901
                 "-t", ferox_threads,
                 "--timeout", "4",
                 "--connect-timeout", "3",
-                "--dont-filter",  # don't auto-filter same-sized responses
+                # Let feroxbuster auto-filter same-sized responses.
+                # Without --dont-filter, feroxbuster detects wildcard/
+                # catch-all pages (common on CTF boxes) and suppresses
+                # false-positive directories that just return the
+                # default homepage.
                 "-q",  # quiet mode
             ]
             # Filter only true junk codes — NOT 403 (interesting for CTF!)
@@ -649,7 +704,25 @@ async def run_web_dirfuzz(  # noqa: C901
                 for status, found_url, size in _parse_feroxbuster(
                     stdout,
                 ):
-                    path = found_url.replace(url, "") or "/"
+                    # Clean URLs to remove :80/:443 default ports
+                    clean_found_url = _clean_url(found_url)
+                    path = clean_found_url.replace(_clean_url(url), "") or "/"
+
+                    # Baseline filtering: skip results that match the
+                    # catch-all/wildcard response (same status + similar
+                    # size).  This is a safety net even when feroxbuster
+                    # auto-filters — some edge cases slip through.
+                    if baseline_status is not None and status == baseline_status:
+                        if baseline_size > 0 and size > 0:
+                            size_diff = abs(size - baseline_size) / max(baseline_size, 1)
+                            if size_diff < 0.1:
+                                logger.debug(
+                                    "[web_dirfuzz] Filtering false-positive"
+                                    " dir %s (size %d ~ baseline %d)",
+                                    path, size, baseline_size,
+                                )
+                                continue
+
                     sev = _severity_for_status(status, path)
                     stage1_findings.append(
                         Finding(
@@ -659,8 +732,8 @@ async def run_web_dirfuzz(  # noqa: C901
                                 f" (HTTP {status}, {size}B)"
                             ),
                             description=(
-                                f"Discovered path on {url}:"
-                                f" {found_url}"
+                                f"Discovered path on {_clean_url(url)}:"
+                                f" {clean_found_url}"
                             ),
                             module="web_dirfuzz",
                             evidence=f"HTTP {status} Size:{size}",
@@ -685,12 +758,24 @@ async def run_web_dirfuzz(  # noqa: C901
 
         if rc in (0, 1) and stdout.strip():
             for status, path, size in _parse_gobuster(stdout):
+                # Baseline filtering for gobuster results too
+                if baseline_status is not None and status == baseline_status:
+                    if baseline_size > 0 and size > 0:
+                        size_diff = abs(size - baseline_size) / max(baseline_size, 1)
+                        if size_diff < 0.1:
+                            logger.debug(
+                                "[web_dirfuzz] Filtering false-positive"
+                                " dir %s (gobuster, size %d ~ baseline %d)",
+                                path, size, baseline_size,
+                            )
+                            continue
+
                 sev = _severity_for_status(status, path)
                 stage1_findings.append(
                     Finding(
                         severity=sev,
                         title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                        description=f"Discovered path on {url}: {path}",
+                        description=f"Discovered path on {_clean_url(url)}: {path}",
                         module="web_dirfuzz",
                         evidence=f"HTTP {status} Size:{size}",
                     )
@@ -727,7 +812,8 @@ async def run_web_dirfuzz(  # noqa: C901
                     "--depth", depth,
                     "--timeout", "7",
                     "--connect-timeout", "5",
-                    "--dont-filter",
+                    # No --dont-filter: let feroxbuster auto-filter
+                    # catch-all/wildcard pages to avoid false positives
                     "--filter-code", "429,502,503",
                     "-q",
                 ],
@@ -738,13 +824,27 @@ async def run_web_dirfuzz(  # noqa: C901
 
             if rc2 in (0, 1) and stdout2.strip():
                 for status, found_url, size in _parse_feroxbuster(stdout2):
-                    path = found_url.replace(url, "") or "/"
+                    clean_found_url = _clean_url(found_url)
+                    path = clean_found_url.replace(_clean_url(url), "") or "/"
+
+                    # Baseline filtering for Stage 2 results too
+                    if baseline_status is not None and status == baseline_status:
+                        if baseline_size > 0 and size > 0:
+                            size_diff = abs(size - baseline_size) / max(baseline_size, 1)
+                            if size_diff < 0.1:
+                                logger.debug(
+                                    "[web_dirfuzz] Filtering false-positive"
+                                    " dir %s (Stage 2, size %d ~ baseline %d)",
+                                    path, size, baseline_size,
+                                )
+                                continue
+
                     sev = _severity_for_status(status, path)
                     findings.append(
                         Finding(
                             severity=sev,
                             title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                            description=f"Discovered path on {url}: {found_url}",
+                            description=f"Discovered path on {_clean_url(url)}: {clean_found_url}",
                             module="web_dirfuzz",
                             evidence=f"HTTP {status} Size:{size}",
                         )
@@ -769,12 +869,24 @@ async def run_web_dirfuzz(  # noqa: C901
 
             if rc2 in (0, 1) and stdout2.strip():
                 for status, path, size in _parse_gobuster(stdout2):
+                    # Baseline filtering for gobuster Stage 2 results too
+                    if baseline_status is not None and status == baseline_status:
+                        if baseline_size > 0 and size > 0:
+                            size_diff = abs(size - baseline_size) / max(baseline_size, 1)
+                            if size_diff < 0.1:
+                                logger.debug(
+                                    "[web_dirfuzz] Filtering false-positive"
+                                    " dir %s (gobuster Stage 2, size %d ~ baseline %d)",
+                                    path, size, baseline_size,
+                                )
+                                continue
+
                     sev = _severity_for_status(status, path)
                     findings.append(
                         Finding(
                             severity=sev,
                             title=f"Fuzz: {path} (HTTP {status}, {size}B)",
-                            description=f"Discovered path on {url}: {path}",
+                            description=f"Discovered path on {_clean_url(url)}: {path}",
                             module="web_dirfuzz",
                             evidence=f"HTTP {status} Size:{size}",
                         )
@@ -868,6 +980,10 @@ async def run_web_dirfuzz(  # noqa: C901
                         if vhost:
                             _register_vhost(vhost, target, state, config)
 
+                        # Build the vhost URL for the finding description
+                        vhost_scheme = urlsplit(url).scheme
+                        vhost_url = _clean_url(f"{vhost_scheme}://{vhost}")
+
                         # Build a clean finding title
                         title_parts = [f"Vhost found: {vhost}"]
                         if status_code:
@@ -887,9 +1003,15 @@ async def run_web_dirfuzz(  # noqa: C901
                             Finding(
                                 severity=vhost_sev,
                                 title=clean_title,
-                                description=f"Virtual host discovered on {url}",
+                                description=(
+                                    f"Virtual host discovered: {vhost_url}"
+                                    f" (on {url})"
+                                ),
                                 module="web_dirfuzz",
                                 evidence=line.strip(),
+                                suggested_commands=[
+                                    f"curl -sI {vhost_url}",
+                                ],
                             )
                         )
 
@@ -924,6 +1046,9 @@ async def run_web_dirfuzz(  # noqa: C901
                         size_found = entry.get("size", 0)
                         if vhost_found:
                             _register_vhost(vhost_found, target, state, config)
+                            # Build the vhost URL
+                            ffuf_scheme = urlsplit(url).scheme
+                            ffuf_vhost_url = _clean_url(f"{ffuf_scheme}://{vhost_found}")
                             stage1_vhost_findings.append(
                                 Finding(
                                     severity=Severity.INFO,
@@ -933,8 +1058,8 @@ async def run_web_dirfuzz(  # noqa: C901
                                         f" {size_found}B)"
                                     ),
                                     description=(
-                                        f"Virtual host discovered on"
-                                        f" {url}: {vhost_found}"
+                                        f"Virtual host discovered:"
+                                        f" {ffuf_vhost_url} (on {url})"
                                     ),
                                     module="web_dirfuzz",
                                     evidence=(
@@ -942,6 +1067,9 @@ async def run_web_dirfuzz(  # noqa: C901
                                         f" Status: {status_found}"
                                         f" Size: {size_found}"
                                     ),
+                                    suggested_commands=[
+                                        f"curl -sI {ffuf_vhost_url}",
+                                    ],
                                 )
                             )
                 except Exception as exc:
@@ -1000,6 +1128,10 @@ async def run_web_dirfuzz(  # noqa: C901
                             if vhost:
                                 _register_vhost(vhost, target, state, config)
 
+                            # Build the vhost URL for the finding description
+                            s2_scheme = urlsplit(url).scheme
+                            s2_vhost_url = _clean_url(f"{s2_scheme}://{vhost}")
+
                             title_parts = [f"Vhost found: {vhost}"]
                             if status_code:
                                 title_parts.append(f"Status: {status_code}")
@@ -1017,9 +1149,15 @@ async def run_web_dirfuzz(  # noqa: C901
                                 Finding(
                                     severity=vhost_sev,
                                     title=clean_title,
-                                    description=f"Virtual host discovered on {url}",
+                                    description=(
+                                        f"Virtual host discovered: {s2_vhost_url}"
+                                        f" (on {url})"
+                                    ),
                                     module="web_dirfuzz",
                                     evidence=line.strip(),
+                                    suggested_commands=[
+                                        f"curl -sI {s2_vhost_url}",
+                                    ],
                                 )
                             )
 
@@ -1054,6 +1192,9 @@ async def run_web_dirfuzz(  # noqa: C901
                             size_found = entry.get("size", 0)
                             if vhost_found:
                                 _register_vhost(vhost_found, target, state, config)
+                                # Build the vhost URL
+                                s2_ffuf_scheme = urlsplit(url).scheme
+                                s2_ffuf_vhost_url = _clean_url(f"{s2_ffuf_scheme}://{vhost_found}")
                                 findings.append(
                                     Finding(
                                         severity=Severity.INFO,
@@ -1063,8 +1204,8 @@ async def run_web_dirfuzz(  # noqa: C901
                                             f" {size_found}B)"
                                         ),
                                         description=(
-                                            f"Virtual host discovered on"
-                                            f" {url}: {vhost_found}"
+                                            f"Virtual host discovered:"
+                                            f" {s2_ffuf_vhost_url} (on {url})"
                                         ),
                                         module="web_dirfuzz",
                                         evidence=(
@@ -1072,6 +1213,9 @@ async def run_web_dirfuzz(  # noqa: C901
                                             f" Status: {status_found}"
                                             f" Size: {size_found}"
                                         ),
+                                        suggested_commands=[
+                                            f"curl -sI {s2_ffuf_vhost_url}",
+                                        ],
                                     )
                                 )
                     except Exception as exc:
