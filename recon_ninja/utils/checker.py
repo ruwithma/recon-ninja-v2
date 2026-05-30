@@ -350,6 +350,15 @@ TOOL_REGISTRY: list[ToolInfo] = [
         version_flag="--version",
         description="Wappalyzer tech detection engine (6,000+ fingerprints)",
     ),
+    ToolInfo(
+        name="chromium",
+        category="optional",
+        install_method="apt",
+        install_package="chromium",
+        alt_names=["chromium-browser", "google-chrome", "google-chrome-stable", "chrome"],
+        version_flag="--version",
+        description="Headless browser for JS-rendered tech detection (React, MUI, etc.)",
+    ),
 
     # ── Additional tools used by modules ───────────────────────────────
     ToolInfo(

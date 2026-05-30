@@ -556,6 +556,10 @@ async def _scan_port(
                         state.add_finding(_vf)
 
             # Quick tech detection on the vhost
+            # NOTE: We run tech detection EVEN on 401 vhosts because:
+            # 1. The 401 page itself may reveal technologies (React, MUI, etc.)
+            # 2. Wappalyzer's browser extension can detect tech from 401 pages
+            # 3. The 401 response body often contains framework signatures
             try:
                 _vhost_tech_result = await run_web_tech(
                     target, port, _vhost_url, state, config, port_dir,
@@ -658,10 +662,12 @@ async def _scan_port(
                                 except Exception:
                                     pass
                 elif not _vhost_specific and _vhost_server:
-                    # No Wappalyzer tech detected but we found a server header
+                    # No Wappalyzer/HTML tech detected but we found a server header
+                    # This can happen with 401 responses, but we still show what we have
                     console.print(
                         f"      [dim]▸[/] Limited tech on [bold]{_vhost_name}[/]:"
-                        f" {_vhost_server} (401 blocks deeper detection)"
+                        f" {_vhost_server}"
+                        + (" (auth required — headless browser may detect more)" if _vhost_auth_type else "")
                     )
             except Exception as exc:
                 logger.debug("[web:%d] Vhost tech scan failed for %s: %s", port, _vhost_name, exc)

@@ -3,15 +3,25 @@
 Detects the underlying tech stack of web applications using a layered
 detection strategy:
 
+**Layer 0 — Headless browser rendering (optional)**: If Chromium or Chrome
+is available, the page is rendered with ``--dump-dom`` to capture the
+full JavaScript-rendered DOM.  This is critical for detecting client-side
+frameworks like React, Vue, Angular, Emotion, and Material UI whose
+signatures only appear after JavaScript execution.  When a rendered DOM
+is available, it is fed to Wappalyzer alongside the raw HTML — matching
+the behaviour of the Wappalyzer browser extension.
+
 **Layer 1 — Wappalyzer (primary)**: Uses the ``python-Wappalyzer`` package
 which bundles Wappalyzer's 6,000+ technology fingerprint database.
-This provides the same detection coverage as the Wappalyzer browser
-extension.  When Wappalyzer is available it runs as the **primary** engine.
+When a rendered DOM (from Layer 0) is available, Wappalyzer analyses
+**both** the raw HTML and the rendered DOM for maximum coverage.
 
 **Layer 2 — Custom fingerprint rules (fallback + confirmation)**: Built-in
-header, cookie, and HTML detection rules that run regardless.  When both
-Wappalyzer and custom rules detect the same technology, the confidence is
-boosted to "certain"; if only one detects, confidence is "probable".
+header, cookie, HTML, CSS-class, and JS-bundle detection rules that run
+regardless.  These include patterns for React, Emotion, Material UI,
+Google Font API, PWA, and many more.  When both Wappalyzer and custom
+rules detect the same technology, the confidence is boosted to "certain";
+if only one detects, confidence is "probable".
 
 **Layer 3 — External tools**: whatweb and nmap service detection provide
 additional context and cross-referencing.
@@ -160,7 +170,9 @@ _WAPPALYZER_CATEGORY_MAP: dict[str, str] = {
     "web frameworks": "framework",
     "javascript frameworks": "framework",
     "javascript libraries": "library",
+    "ui frameworks": "framework",
     "web servers": "server",
+    "reverse proxies": "server",
     "programming languages": "language",
     "databases": "database",
     "cdn": "cdn",
@@ -178,6 +190,16 @@ _WAPPALYZER_CATEGORY_MAP: dict[str, str] = {
     "build tools": "framework",
     "containerization": "server",
     "api tools": "library",
+    "progressive web apps": "framework",
+    "development": "framework",
+    "obfuscators": "other",
+    "indentifiers": "other",
+    "ssl/tls certificate authorities": "other",
+    "advertising": "analytics",
+    "tag managers": "analytics",
+    "issue trackers": "other",
+    "documentation": "other",
+    "dart": "language",
 }
 
 
@@ -262,38 +284,201 @@ HTML_TECH_RULES: list[dict[str, Any]] = [
      "name": "jQuery", "category": "library", "confidence": "probable"},
     {"pattern": r'jquery[/-]([\d.]+)',
      "name": "jQuery", "category": "library", "confidence": "probable"},
-    {"pattern": r'src=["\'][^"\']*react(\.production)?\.min\.js',
+    # React — multiple detection strategies for SPA/CSR apps
+    {"pattern": r'src=["\'][^"\']*react(\.production|\.development)?\.min\.js',
      "name": "React", "category": "framework", "confidence": "probable"},
-    {"pattern": r'src=["\'][^"\']*vue(\.min)?\.js',
+    {"pattern": r'src=["\'][^"\']*react[\w/.-]*\.js',
+     "name": "React", "category": "framework", "confidence": "probable"},
+    {"pattern": r'data-reactroot',
+     "name": "React", "category": "framework", "confidence": "certain"},
+    {"pattern": r'data-reactid',
+     "name": "React", "category": "framework", "confidence": "probable"},
+    {"pattern": r'_reactRootContainer',
+     "name": "React", "category": "framework", "confidence": "certain"},
+    {"pattern": r'__REACT_DEVTOOLS',
+     "name": "React", "category": "framework", "confidence": "certain"},
+    {"pattern": r'react-dom',
+     "name": "React", "category": "framework", "confidence": "probable"},
+    {"pattern": r'src=["\'][^"\']*react-dom',
+     "name": "React", "category": "framework", "confidence": "probable"},
+    # Vue.js
+    {"pattern": r'src=["\'][^"\']*vue(\.min|\.runtime)?\.js',
      "name": "Vue.js", "category": "framework", "confidence": "probable"},
+    {"pattern": r'data-v-[a-f0-9]{4,8}',
+     "name": "Vue.js", "category": "framework", "confidence": "probable"},
+    {"pattern": r'__VUE_APP_',
+     "name": "Vue.js", "category": "framework", "confidence": "certain"},
+    # Angular
     {"pattern": r'src=["\'][^"\']*angular(\.min)?\.js',
      "name": "Angular", "category": "framework", "confidence": "probable"},
+    {"pattern": r'_ngcontent',
+     "name": "Angular", "category": "framework", "confidence": "probable"},
+    {"pattern": r'_nghost',
+     "name": "Angular", "category": "framework", "confidence": "probable"},
+    {"pattern": r'ng-version=["\']([\d.]+)',
+     "name": "Angular", "category": "framework", "confidence": "certain"},
+    # Next.js
     {"pattern": r'src=["\'][^"\']*_next/',
      "name": "Next.js", "category": "framework", "confidence": "certain"},
+    {"pattern": r'__NEXT_DATA__',
+     "name": "Next.js", "category": "framework", "confidence": "certain"},
+    {"pattern": r'id=["\']__next["\']',
+     "name": "Next.js", "category": "framework", "confidence": "certain"},
+    # Nuxt.js
     {"pattern": r'src=["\'][^"\']*/nuxt/',
      "name": "Nuxt.js", "category": "framework", "confidence": "certain"},
+    {"pattern": r'__NUXT__',
+     "name": "Nuxt.js", "category": "framework", "confidence": "certain"},
+    # Svelte
+    {"pattern": r'class="svelte-[a-z0-9]+"',
+     "name": "Svelte", "category": "framework", "confidence": "probable"},
+    # Emotion (CSS-in-JS)
+    {"pattern": r'css-[a-z0-9]+',
+     "name": "Emotion", "category": "framework", "confidence": "probable"},
+    {"pattern": r'emotion-cache',
+     "name": "Emotion", "category": "framework", "confidence": "certain"},
+    {"pattern": r'data-emotion',
+     "name": "Emotion", "category": "framework", "confidence": "certain"},
+    {"pattern": r'<style\s+data-emotion=["\']css',
+     "name": "Emotion", "category": "framework", "confidence": "certain"},
+    {"pattern": r'@emotion[/\s]',
+     "name": "Emotion", "category": "framework", "confidence": "probable"},
+    # Material UI (MUI)
+    {"pattern": r'class="[^"]*Mui[A-Z]\w+',
+     "name": "Material UI", "category": "framework", "confidence": "probable"},
+    {"pattern": r'class="[^"]*MuiButton',
+     "name": "Material UI", "category": "framework", "confidence": "certain"},
+    {"pattern": r'class="[^"]*MuiPaper',
+     "name": "Material UI", "category": "framework", "confidence": "certain"},
+    {"pattern": r'class="[^"]*MuiTypography',
+     "name": "Material UI", "category": "framework", "confidence": "certain"},
+    {"pattern": r'class="[^"]*MuiBox',
+     "name": "Material UI", "category": "framework", "confidence": "certain"},
+    {"pattern": r'mui\.com',
+     "name": "Material UI", "category": "framework", "confidence": "probable"},
+    {"pattern": r'@mui[/\s]',
+     "name": "Material UI", "category": "framework", "confidence": "probable"},
+    # Chakra UI
+    {"pattern": r'class="[^"]*chakra[^"]*"',
+     "name": "Chakra UI", "category": "framework", "confidence": "probable"},
+    {"pattern": r'css-0\s*\{',
+     "name": "Chakra UI", "category": "framework", "confidence": "possible"},
+    # Ant Design
+    {"pattern": r'class="[^"]*ant-[\w-]+"',
+     "name": "Ant Design", "category": "framework", "confidence": "probable"},
+    {"pattern": r'antd[\w/.-]*\.js',
+     "name": "Ant Design", "category": "framework", "confidence": "probable"},
+    # Bootstrap
     {"pattern": r'src=["\'][^"\']*bootstrap(\.min)?\.js',
      "name": "Bootstrap", "category": "library", "confidence": "certain"},
-    {"pattern": r'src=["\'][^"\']*tailwind',
-     "name": "Tailwind CSS", "category": "library", "confidence": "probable"},
-    # Link href patterns (CSS)
     {"pattern": r'href=["\'][^"\']*bootstrap[/-]([\d.]+)',
      "name": "Bootstrap", "category": "library", "confidence": "certain"},
+    # Tailwind CSS
+    {"pattern": r'src=["\'][^"\']*tailwind',
+     "name": "Tailwind CSS", "category": "library", "confidence": "probable"},
+    {"pattern": r'class="[^"]*\bflex\b[^"]*\bitems-center\b',
+     "name": "Tailwind CSS", "category": "library", "confidence": "possible"},
+    {"pattern": r'class="[^"]*\bgrid\b[^"]*\bgap-',
+     "name": "Tailwind CSS", "category": "library", "confidence": "possible"},
+    # Font Awesome
     {"pattern": r'href=["\'][^"\']*font-awesome',
      "name": "Font Awesome", "category": "library", "confidence": "certain"},
+    {"pattern": r'class="[^"]*fa\s+fa-',
+     "name": "Font Awesome", "category": "library", "confidence": "certain"},
+    {"pattern": r'class="[^"]*fas\s+fa-',
+     "name": "Font Awesome", "category": "library", "confidence": "certain"},
+    {"pattern": r'class="[^"]*fab\s+fa-',
+     "name": "Font Awesome", "category": "library", "confidence": "certain"},
+    # Google Font API
+    {"pattern": r'href=["\'][^"\']*fonts\.googleapis\.com',
+     "name": "Google Font API", "category": "library", "confidence": "certain"},
+    {"pattern": r'href=["\'][^"\']*fonts\.gstatic\.com',
+     "name": "Google Font API", "category": "library", "confidence": "certain"},
+    {"pattern": r'src=["\'][^"\']*fonts\.googleapis\.com',
+     "name": "Google Font API", "category": "library", "confidence": "certain"},
+    {"pattern": r'link[^>]*googleapis\.com/css\?family',
+     "name": "Google Font API", "category": "library", "confidence": "certain"},
+    # PWA (Progressive Web App)
+    {"pattern": r'rel=["\']manifest["\']',
+     "name": "PWA", "category": "framework", "confidence": "probable"},
+    {"pattern": r'serviceWorker\.register',
+     "name": "PWA", "category": "framework", "confidence": "probable"},
+    {"pattern": r'navigator\.serviceWorker',
+     "name": "PWA", "category": "framework", "confidence": "probable"},
+    {"pattern": r'href=["\'][^"\']*manifest\.json',
+     "name": "PWA", "category": "framework", "confidence": "probable"},
+    {"pattern": r'href=["\'][^"\']*manifest\.webmanifest',
+     "name": "PWA", "category": "framework", "confidence": "probable"},
+    # Open Graph
+    {"pattern": r'<meta\s+(?:property|name)=["\']og:',
+     "name": "Open Graph", "category": "other", "confidence": "certain"},
     # HTML comment patterns
     {"pattern": r'<!--\s*This is Squarespace',
      "name": "Squarespace", "category": "cms", "confidence": "certain"},
     {"pattern": r'<!--\s*Shopify',
      "name": "Shopify", "category": "cms", "confidence": "certain"},
-    # Next.js specific patterns
-    {"pattern": r'__NEXT_DATA__',
-     "name": "Next.js", "category": "framework", "confidence": "certain"},
-    {"pattern": r'id=["\']__next["\']',
-     "name": "Next.js", "category": "framework", "confidence": "certain"},
     # Laravel specific
     {"pattern": r'csrf-token["\']\s+content=["\'][^"\']*',
      "name": "Laravel", "category": "framework", "confidence": "probable"},
+    # Webpack / Vite / Parcel (build tools)
+    {"pattern": r'src=["\'][^"\']*webpack[\w/.-]*\.js',
+     "name": "Webpack", "category": "framework", "confidence": "probable"},
+    {"pattern": r'src=["\'][^"\']*chunk\.js',
+     "name": "Webpack", "category": "framework", "confidence": "possible"},
+    {"pattern": r'src=["\'][^"\']*vendor[\w/.-]*\.js',
+     "name": "Webpack", "category": "framework", "confidence": "possible"},
+    {"pattern": r'src=["\'][^"\']*@[a-f0-9]{4,16}\.js',
+     "name": "Vite", "category": "framework", "confidence": "possible"},
+    {"pattern": r'type=["\']module["\']\s+src=["\'][^"\']*/@vite',
+     "name": "Vite", "category": "framework", "confidence": "certain"},
+    # Stimulus (Rails)
+    {"pattern": r'data-controller=["\']',
+     "name": "Stimulus", "category": "framework", "confidence": "probable"},
+    # Alpine.js
+    {"pattern": r'x-data=["\']',
+     "name": "Alpine.js", "category": "framework", "confidence": "probable"},
+    {"pattern": r'x-show=["\']',
+     "name": "Alpine.js", "category": "framework", "confidence": "probable"},
+    # HTMX
+    {"pattern": r'hx-get=["\']',
+     "name": "HTMX", "category": "library", "confidence": "certain"},
+    {"pattern": r'hx-post=["\']',
+     "name": "HTMX", "category": "library", "confidence": "certain"},
+    {"pattern": r'src=["\'][^"\']*htmx',
+     "name": "HTMX", "category": "library", "confidence": "certain"},
+    # Cloudflare
+    {"pattern": r'cdn-cgi/',
+     "name": "Cloudflare", "category": "cdn", "confidence": "certain"},
+    {"pattern": r'__cf_bm',
+     "name": "Cloudflare", "category": "waf", "confidence": "certain"},
+    # WordPress additional
+    {"pattern": r'wp-content/',
+     "name": "WordPress", "category": "cms", "confidence": "probable"},
+    {"pattern": r'wp-includes/',
+     "name": "WordPress", "category": "cms", "confidence": "probable"},
+    # Drupal additional
+    {"pattern": r'Drupal\.settings',
+     "name": "Drupal", "category": "cms", "confidence": "probable"},
+    {"pattern": r'sites/default/files',
+     "name": "Drupal", "category": "cms", "confidence": "possible"},
+    # GraphQL
+    {"pattern": r'graphql',
+     "name": "GraphQL", "category": "library", "confidence": "possible"},
+    # Chart.js
+    {"pattern": r'src=["\'][^"\']*chart(\.min)?\.js',
+     "name": "Chart.js", "category": "library", "confidence": "probable"},
+    # D3.js
+    {"pattern": r'src=["\'][^"\']*d3(\.min)?\.js',
+     "name": "D3.js", "category": "library", "confidence": "probable"},
+    # Three.js
+    {"pattern": r'src=["\'][^"\']*three(\.min)?\.js',
+     "name": "Three.js", "category": "library", "confidence": "probable"},
+    # Lodash
+    {"pattern": r'src=["\'][^"\']*lodash(\.min)?\.js',
+     "name": "Lodash", "category": "library", "confidence": "probable"},
+    # Moment.js
+    {"pattern": r'src=["\'][^"\']*moment(\.min)?\.js',
+     "name": "Moment.js", "category": "library", "confidence": "probable"},
 ]
 
 
@@ -605,6 +790,166 @@ def _detect_from_nmap(services: dict[int, Any], port: int) -> list[TechInfo]:
     return techs
 
 
+# ---------------------------------------------------------------------------
+# Headless browser rendering (Layer 0)
+# ---------------------------------------------------------------------------
+
+#: Candidate binaries for headless browser rendering (in preference order).
+_HEADLESS_BROWSER_CANDIDATES = [
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+    "chrome",
+]
+
+
+def _find_headless_browser() -> str | None:
+    """Return the path of an available headless browser, or None."""
+    for candidate in _HEADLESS_BROWSER_CANDIDATES:
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return None
+
+
+async def _render_with_headless_browser(
+    url: str,
+    timeout: int = 20,
+) -> str:
+    """Render a URL with a headless Chromium/Chrome and return the full DOM.
+
+    Uses ``chromium --headless --dump-dom`` which renders the page
+    (executing JavaScript) and dumps the resulting DOM to stdout.
+    This is critical for detecting client-side frameworks like React,
+    Emotion, and Material UI whose signatures only appear in the
+    rendered DOM after JavaScript execution.
+
+    Parameters
+    ----------
+    url:
+        Target URL to render.
+    timeout:
+        Maximum seconds to wait for the page to render.
+
+    Returns
+    -------
+    str
+        The rendered HTML DOM, or an empty string on failure.
+    """
+    browser_path = _find_headless_browser()
+    if not browser_path:
+        return ""
+
+    try:
+        rc, stdout, stderr = await run_tool(
+            cmd=[
+                browser_path,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-sync",
+                "--no-first-run",
+                "--disable-translate",
+                "--mute-audio",
+                f"--timeout={timeout * 1000}",
+                "--dump-dom",
+                url,
+            ],
+            timeout=timeout + 10,
+        )
+
+        if rc in (0, 1) and stdout.strip():
+            # Chromium sometimes exits with code 1 even on success
+            # when --dump-dom is used with certain page configurations.
+            # What matters is whether we got HTML output.
+            if "<" in stdout and ">" in stdout:
+                logger.info(
+                    "[web_tech] Headless browser rendered %d chars from %s",
+                    len(stdout), url,
+                )
+                return stdout[:200000]
+
+        logger.debug(
+            "[web_tech] Headless browser returned rc=%d, stdout=%d chars",
+            rc, len(stdout),
+        )
+    except Exception as exc:
+        logger.debug("[web_tech] Headless browser rendering failed: %s", exc)
+
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# OS detection from nmap
+# ---------------------------------------------------------------------------
+
+
+def _detect_os_from_nmap(services: dict[int, Any]) -> list[TechInfo]:
+    """Extract operating system information from nmap service detection.
+
+    Nmap often detects the OS from service banners (e.g. 'OpenSSH 9.6p1
+    Ubuntu 3ubuntu13.15' reveals Ubuntu).  This function scans all
+    services for OS hints and returns them as TechInfo objects.
+
+    Returns
+    -------
+    list[TechInfo]
+        Detected OS technologies (typically one entry).
+    """
+    techs: list[TechInfo] = []
+    detected_os: set[str] = set()
+
+    for _port, svc in services.items():
+        # Check product name for OS hints
+        combined = f"{svc.product} {svc.version} {svc.extra_info}".lower()
+
+        os_patterns: list[tuple[str, str]] = [
+            ("ubuntu", "Ubuntu"),
+            ("debian", "Debian"),
+            ("centos", "CentOS"),
+            ("fedora", "Fedora"),
+            ("red hat", "Red Hat"),
+            ("amazon linux", "Amazon Linux"),
+            ("windows", "Windows"),
+            ("microsoft", "Windows"),
+            ("freebsd", "FreeBSD"),
+        ]
+
+        for pattern, os_name in os_patterns:
+            if pattern in combined and os_name not in detected_os:
+                # Try to extract version
+                version = ""
+                ver_match = re.search(
+                    re.escape(pattern) + r"\s*([\d.]+)",
+                    combined,
+                    re.IGNORECASE,
+                )
+                if ver_match:
+                    version = ver_match.group(1)
+                # Also check for Ubuntu codename version from nmap OS string
+                if os_name == "Ubuntu" and not version:
+                    ub_match = re.search(r"ubuntu\s*([\d.]+)", combined, re.IGNORECASE)
+                    if ub_match:
+                        version = ub_match.group(1)
+
+                detected_os.add(os_name)
+                techs.append(TechInfo(
+                    name=os_name,
+                    version=version,
+                    category="os",
+                    confidence="probable",
+                    source="nmap",
+                    port=0,  # OS-level, not port-specific
+                ))
+                break  # One OS per service is enough
+
+    return techs
+
+
 def _cross_reference_techs(all_techs: list[TechInfo]) -> list[TechInfo]:
     """Cross-reference detections from multiple sources for confidence scoring.
 
@@ -822,14 +1167,65 @@ async def run_web_tech(
         logger.info("[web_tech:%d] HTML analysis found %d techs", port, len(html_techs))
 
     # ------------------------------------------------------------------
+    # 2b. Headless browser rendering — Layer 0 (JS-rendered DOM)
+    # ------------------------------------------------------------------
+    # This is the KEY improvement for detecting client-side frameworks
+    # like React, Emotion, Material UI, etc.  These technologies are
+    # only detectable in the rendered DOM after JavaScript execution.
+    # Without this layer, the tool misses them (as seen when comparing
+    # with the Wappalyzer browser extension).
+    rendered_dom = ""
+    headless_browser = _find_headless_browser()
+    if headless_browser:
+        logger.info("[web_tech:%d] Rendering page with headless browser: %s", port, headless_browser)
+        rendered_dom = await _render_with_headless_browser(url, timeout=20)
+        if rendered_dom:
+            raw_parts.append(f"=== Rendered DOM (first 5KB) ===\n{rendered_dom[:5000]}")
+            # Run HTML detection on the rendered DOM too — this catches
+            # React data-reactroot, Emotion css- classes, MUI Mui* classes,
+            # Google Font links, PWA manifests, etc. that only appear
+            # after JavaScript renders the page.
+            rendered_techs = _detect_from_html(rendered_dom, port)
+            all_techs.extend(rendered_techs)
+            logger.info("[web_tech:%d] Rendered DOM analysis found %d techs", port, len(rendered_techs))
+        else:
+            logger.debug("[web_tech:%d] Headless browser returned empty DOM", port)
+    else:
+        logger.debug("[web_tech:%d] No headless browser available — skipping JS rendering", port)
+
+    # ------------------------------------------------------------------
     # 3. WAPPALYZER — Primary detection engine (6,000+ fingerprints)
     # ------------------------------------------------------------------
+    # When we have a rendered DOM, we feed it to Wappalyzer IN ADDITION
+    # to the raw HTML.  This matches the behaviour of the Wappalyzer
+    # browser extension which analyses the rendered DOM.
     if _HAS_WAPPALYZER:
+        # Primary analysis with raw HTML + headers
         wa_techs = _detect_with_wappalyzer(url, headers, html_source, port)
         all_techs.extend(wa_techs)
         if wa_techs:
-            logger.info("[web_tech:%d] Wappalyzer found %d techs", port, len(wa_techs))
-            raw_parts.append(f"=== Wappalyzer ===\n{json.dumps({t.name: t.version for t in wa_techs}, indent=2)}")
+            logger.info("[web_tech:%d] Wappalyzer (raw) found %d techs", port, len(wa_techs))
+            raw_parts.append(f"=== Wappalyzer (raw) ===\n{json.dumps({t.name: t.version for t in wa_techs}, indent=2)}")
+
+        # Secondary analysis with rendered DOM — catches client-side tech
+        if rendered_dom:
+            wa_rendered_techs = _detect_with_wappalyzer(url, headers, rendered_dom, port)
+            # Only add techs that weren't already detected in raw analysis
+            existing_names = {t.name.lower() for t in wa_techs}
+            new_wa_techs = [
+                t for t in wa_rendered_techs
+                if t.name.lower() not in existing_names
+            ]
+            if new_wa_techs:
+                all_techs.extend(new_wa_techs)
+                logger.info(
+                    "[web_tech:%d] Wappalyzer (rendered) found %d NEW techs",
+                    port, len(new_wa_techs),
+                )
+                raw_parts.append(
+                    f"=== Wappalyzer (rendered) ===\n"
+                    f"{json.dumps({t.name: t.version for t in new_wa_techs}, indent=2)}"
+                )
     else:
         logger.info("[web_tech:%d] Wappalyzer not available — using custom rules only", port)
         raw_parts.append("=== Wappalyzer === SKIPPED (install: pip install python-Wappalyzer)")
@@ -866,6 +1262,21 @@ async def run_web_tech(
     all_techs.extend(nmap_techs)
     if nmap_techs:
         logger.info("[web_tech:%d] Nmap service info found %d techs", port, len(nmap_techs))
+
+    # ------------------------------------------------------------------
+    # 5b. OS detection from nmap banners
+    # ------------------------------------------------------------------
+    # Nmap often detects the OS from service banners (e.g. 'Ubuntu' in
+    # 'OpenSSH 9.6p1 Ubuntu 3ubuntu13.15').  This surfaces the OS in
+    # the tech stack display, matching what Wappalyzer shows.
+    os_techs = _detect_os_from_nmap(state.services)
+    for os_tech in os_techs:
+        # Only add if not already detected (avoid duplicate Ubuntu entries)
+        existing_os = {t.name.lower() for t in all_techs if t.category == "os"}
+        if os_tech.name.lower() not in existing_os:
+            all_techs.append(os_tech)
+            # Also add to state with port 0 (OS-level)
+            state.add_tech(os_tech)
 
     # ------------------------------------------------------------------
     # 6. Cross-reference and deduplicate
