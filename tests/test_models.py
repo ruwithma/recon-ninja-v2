@@ -151,14 +151,14 @@ class TestServiceInfoUrl:
             port=80, proto="tcp", state="open",
             service="http", hostname="target.local",
         )
-        assert svc.url == "http://target.local:80"
+        assert svc.url == "http://target.local"
 
     def test_https_service_url(self) -> None:
         svc = ServiceInfo(
             port=443, proto="tcp", state="open",
             service="ssl/http", hostname="target.local",
         )
-        assert svc.url == "https://target.local:443"
+        assert svc.url == "https://target.local"
 
     def test_http_on_443_gets_https(self) -> None:
         """Port 443 should default to https even if service doesn't say ssl."""
@@ -166,7 +166,7 @@ class TestServiceInfoUrl:
             port=443, proto="tcp", state="open",
             service="http", hostname="target.local",
         )
-        assert svc.url == "https://target.local:443"
+        assert svc.url == "https://target.local"
 
     def test_http_on_8443_gets_https(self) -> None:
         svc = ServiceInfo(
@@ -187,7 +187,7 @@ class TestServiceInfoUrl:
             port=80, proto="tcp", state="open",
             service="http", hostname=None,
         )
-        assert svc.url == "http://TARGET:80"
+        assert svc.url == "http://TARGET"
 
     def test_http_alt_service(self) -> None:
         """Service name containing 'http' (e.g. 'http-alt') should produce a URL."""

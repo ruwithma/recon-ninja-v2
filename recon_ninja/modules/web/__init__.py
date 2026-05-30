@@ -63,10 +63,29 @@ def _is_valid_hostname(name: str) -> bool:
     return True
 
 
+def _build_url(scheme: str, host: str, port: int) -> str:
+    """Build a URL, omitting default ports (80 for HTTP, 443 for HTTPS).
+
+    Default ports are omitted so that URLs work correctly in browsers
+    and curl without redirecting to the bare hostname.
+    """
+    if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
+
+
 def _rebuild_url_with_hostname(url: str, hostname: str, port: int) -> str:
-    """Replace the host component of a URL while preserving suffixes."""
+    """Replace the host component of a URL while preserving suffixes.
+
+    Omits default ports so URLs are clean and browser-friendly.
+    """
     parts = urlsplit(url)
-    return urlunsplit((parts.scheme, f"{hostname}:{port}", parts.path, parts.query, parts.fragment))
+    # Omit default ports from the netloc
+    if (parts.scheme == "http" and port == 80) or (parts.scheme == "https" and port == 443):
+        netloc = hostname
+    else:
+        netloc = f"{hostname}:{port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def _print_fast_findings(findings: list[Finding], port: int, category: str) -> None:
@@ -376,7 +395,7 @@ async def _scan_port(
             if not _vh_match:
                 continue
             _vhost_name = _vh_match.group(1).split(":")[0]
-            _vhost_url = f"{urlsplit(url).scheme}://{_vhost_name}:{port}"
+            _vhost_url = _build_url(urlsplit(url).scheme, _vhost_name, port)
 
             # Probe vhost for HTTP response details (auth type, headers, etc.)
             _vhost_auth_type = ""
@@ -445,6 +464,96 @@ async def _scan_port(
                 console.print(
                     f"      [dim]•[/] Server on [bold]{_vhost_name}[/]: {_vhost_server}"
                 )
+
+            # ============================================================
+            # VHOST PATH PROBING — Re-check common sensitive paths
+            # against the vhost.  This is CRITICAL because vhosts
+            # often have completely different content from the main
+            # host.  Paths that return 200 on the main domain (which
+            # may be a catch-all) may be real on the vhost, and
+            # vice versa.
+            # ============================================================
+            if shutil.which("curl") and not _vhost_auth_type:
+                # Only probe if the vhost doesn't require auth (401
+                # means we can't get meaningful path results anyway).
+                from recon_ninja.modules.web.web_dirfuzz import COMMON_PATHS, _check_path, _head_status
+                _vh_baseline_status, _vh_baseline_redirect, _vh_baseline_size = (
+                    await _head_status(_vhost_url, "/rn_404_baseline_check")
+                )
+                _vh_path_semaphore = asyncio.Semaphore(5)
+
+                async def _bounded_vhost_check(
+                    vh_url: str, p: str, s: "Severity",
+                ) -> Finding | None:
+                    async with _vh_path_semaphore:
+                        return await _check_path(
+                            vh_url, p, s,
+                            _vh_baseline_status, _vh_baseline_redirect,
+                            _vh_baseline_size,
+                        )
+
+                _vh_path_tasks = [
+                    asyncio.create_task(
+                        _bounded_vhost_check(_vhost_url, path, sev)
+                    )
+                    for path, sev in COMMON_PATHS
+                    if path not in ("/", "/robots.txt")
+                ]
+                _vh_path_results = await asyncio.gather(
+                    *_vh_path_tasks, return_exceptions=True
+                )
+
+                _vh_path_findings: list[Finding] = []
+                for _vh_pr in _vh_path_results:
+                    if isinstance(_vh_pr, Finding):
+                        # Rewrite the finding to reference the vhost
+                        # hostname, not the main host.  The original
+                        # finding has the full URL with the vhost name
+                        # already (since we passed _vhost_url), but
+                        # we prefix the title with the vhost name so
+                        # it's immediately clear which host the path
+                        # was found on.
+                        _vh_pr.title = (
+                            f"[{_vhost_name}] {_vh_pr.title}"
+                        )
+                        _vh_path_findings.append(_vh_pr)
+
+                if _vh_path_findings:
+                    # Filter out findings that are identical to the main
+                    # host findings (same path, same status, same size) —
+                    # these are likely the same catch-all response.
+                    _main_paths = {
+                        (f.title, f.evidence)
+                        for f in dirfuzz_result.findings
+                        if f.title.startswith("Path found:")
+                    }
+                    _unique_vh_findings = []
+                    for _vf in _vh_path_findings:
+                        # Strip the [vhost] prefix for comparison
+                        _bare_title = _vf.title.replace(
+                            f"[{_vhost_name}] ", ""
+                        )
+                        _is_dup = any(
+                            _bare_title == mt for mt, _ in _main_paths
+                        )
+                        if not _is_dup:
+                            _unique_vh_findings.append(_vf)
+
+                    if _unique_vh_findings:
+                        console.print(
+                            f"      [bold green][+][/] Found "
+                            f"[bold cyan]{len(_unique_vh_findings)}[/]"
+                            f" paths on [bold]{_vhost_name}[/]"
+                        )
+                        for _vf in _unique_vh_findings[:10]:
+                            _sev_style = _vf.severity.rich_style
+                            console.print(
+                                f"        [{_sev_style}]•[/] {_vf.title}"
+                            )
+                    # Add all vhost path findings (even dups) to results
+                    # so the report includes per-vhost paths.
+                    for _vf in _vh_path_findings:
+                        state.add_finding(_vf)
 
             # Quick tech detection on the vhost
             try:
@@ -667,7 +776,7 @@ async def run_web_module(
                 if svc.url and "TARGET" in svc.url:
                     url = svc.url.replace("TARGET", current_host)
                 else:
-                    url = f"{scheme}://{current_host}:{port}"
+                    url = _build_url(scheme, current_host, port)
 
                 try:
                     port_results = await _scan_port(

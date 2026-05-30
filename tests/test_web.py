@@ -61,8 +61,8 @@ class TestWebModuleOrchestration:
             result = await run_web_module("10.129.7.81", state, config, tmp_path)
 
         assert result.status == "done"
-        assert captured["tech_url"] == "http://smarthire.htb:80"
-        assert captured["dirfuzz_url"] == "http://smarthire.htb:80"
+        assert captured["tech_url"] == "http://smarthire.htb"
+        assert captured["dirfuzz_url"] == "http://smarthire.htb"
         assert captured["dirfuzz_hostname"] == "smarthire.htb"
 
 

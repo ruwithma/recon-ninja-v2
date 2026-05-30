@@ -188,15 +188,24 @@ class ServiceInfo:
 
         Detects web services both by nmap service name (http/https/ssl/http)
         and by common web port numbers that nmap sometimes misidentifies.
+        Default ports (80 for HTTP, 443 for HTTPS) are omitted from the URL
+        so that links work correctly in browsers and curl.
         """
         # Known web service name patterns
         if any(p in self.service.lower() for p in ("http", "ssl/http", "https")):
             scheme = "https" if "ssl" in self.service or self.port in (443, 8443) else "http"
-            return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
+            host = self.hostname or "TARGET"
+            # Omit default ports so URLs work in browsers
+            if (scheme == "http" and self.port == 80) or (scheme == "https" and self.port == 443):
+                return f"{scheme}://{host}"
+            return f"{scheme}://{host}:{self.port}"
 
         if self.port in KNOWN_WEB_PORTS:
             scheme = "https" if self.port in (443, 8443, 4443) else "http"
-            return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
+            host = self.hostname or "TARGET"
+            if (scheme == "http" and self.port == 80) or (scheme == "https" and self.port == 443):
+                return f"{scheme}://{host}"
+            return f"{scheme}://{host}:{self.port}"
 
         return None
 

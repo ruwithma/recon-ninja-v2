@@ -614,7 +614,7 @@ class ReconEngine:
                     if f.module == "web_dirfuzz":
                         if f.title.startswith("Vhost found:"):
                             vhost_findings.append(f)
-                        elif f.title.startswith("Fuzz:") or f.title.startswith("Path found:"):
+                        elif f.title.startswith("Fuzz:") or f.title.startswith("Path found:") or f.title.startswith("[") and "Path found:" in f.title:
                             dirfuzz_findings.append(f)
             if dirfuzz_findings or vhost_findings:
                 display_discovered_paths(dirfuzz_findings, vhost_findings)
@@ -1486,6 +1486,9 @@ class ReconEngine:
                     continue
                 scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
                 vhost_url = f"{scheme}://{vhost}:{port}"
+                # Omit default ports for clean URLs
+                if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+                    vhost_url = f"{scheme}://{vhost}"
 
                 # Skip if we already have tech results for this vhost on this port
                 # (the web module may have already scanned it)

@@ -195,14 +195,14 @@ class TestServiceInfo:
             port=80, proto="tcp", state="open",
             service="http", hostname="example.com",
         )
-        assert svc.url == "http://example.com:80"
+        assert svc.url == "http://example.com"
 
     def test_url_https_service(self) -> None:
         svc = ServiceInfo(
             port=443, proto="tcp", state="open",
             service="ssl/http", hostname="example.com",
         )
-        assert svc.url == "https://example.com:443"
+        assert svc.url == "https://example.com"
 
     def test_url_non_web_service(self) -> None:
         svc = ServiceInfo(

@@ -1001,17 +1001,26 @@ def display_discovered_paths(
 
     # --- Directory / path findings ---
     if dirfuzz_findings:
-        # Group by port — extract port from description or evidence
-        port_paths: dict[str, list[tuple[str, str, str]]] = {}  # port → [(path, status, size)]
+        # Group by host (vhost or main) — extract host from [vhost] prefix
+        # or from URL in description.  Paths without a [vhost] prefix
+        # belong to the main host.
+        host_paths: dict[str, list[tuple[str, str, str]]] = {}  # host_label → [(path, status, size)]
         import re as _re
         for f in dirfuzz_findings:
             # Try to extract structured info from the finding
             # Titles like "Fuzz: /admin (HTTP 200, 1234B)" or "Path found: /.git/ (HTTP 200)"
-            # or older format "Fuzz: /admin [200] [1234b]"
+            # or "[staging.htb] Path found: /.env (HTTP 200)"
             path = ""
             status_code = ""
             size = ""
             title = f.title
+
+            # Detect vhost prefix: [vhost_name] Path found: ...
+            vhost_prefix = ""
+            vhost_match = _re.match(r"^\[([^\]]+)\]\s*", title)
+            if vhost_match:
+                vhost_prefix = vhost_match.group(1)
+                title = title[vhost_match.end():]  # strip prefix for parsing
 
             # Extract path — stop before parenthesis or bracket
             path_match = _re.search(r"(?:Fuzz|Path found):\s*(\S+?)(?:\s*[(\[])", title)
@@ -1038,21 +1047,27 @@ def display_discovered_paths(
             if size_match:
                 size = size_match.group(1)
 
-            # Try to extract port from description (URL patterns)
-            port = "—"
-            port_match = _re.search(r":(\d{1,5})/", f.description or "")
-            if port_match:
-                port = port_match.group(1)
-            elif f.evidence:
-                port_match2 = _re.search(r":(\d{1,5})/", f.evidence)
-                if port_match2:
-                    port = port_match2.group(1)
+            # Determine host label for grouping
+            # If vhost prefix found, use it; otherwise try URL from description
+            if vhost_prefix:
+                host_label = vhost_prefix
+            else:
+                # Try to extract host from description URL
+                host_label = "—"
+                url_match = _re.search(r"https?://([^/:]+)", f.description or "")
+                if url_match:
+                    host_label = url_match.group(1)
 
-            port_paths.setdefault(port, []).append((path or title, status_code, size))
+            # If vhost prefix, prepend it to the path for clarity
+            display_path = path or f.title
+            if vhost_prefix:
+                display_path = f"[cyan]{vhost_prefix}[/] {display_path}"
 
-        for port, paths in sorted(port_paths.items()):
+            host_paths.setdefault(host_label, []).append((display_path, status_code, size))
+
+        for host_label, paths in sorted(host_paths.items()):
             table = Table(
-                title=f"[bold bright_green] Discovered Paths — Port {port} [/]",
+                title=f"[bold bright_green] Discovered Paths — {host_label} [/]",
                 show_header=True,
                 header_style="bold white",
                 border_style="green",
