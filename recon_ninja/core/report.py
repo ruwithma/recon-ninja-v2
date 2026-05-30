@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -1031,14 +1032,13 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
         commands.append("# --- Virtual Hosts (high-value CTF targets) ---")
         for vf in vhost_findings[:5]:
             # Extract vhost name
-            import re as _re
-            _vh_match = _re.search(r"Vhost found:\s*([^\s]+)", vf.title)
+            _vh_match = re.search(r"Vhost found:\s*([^\s]+)", vf.title)
             if _vh_match:
                 _vhost = _vh_match.group(1).split(":")[0]
                 commands.append(f"curl -s http://{_vhost}  # Probe vhost content")
         for vf in vhost_auth_findings[:3]:
             # Extract vhost name from auth findings
-            _vh_match = _re.search(r"Vhost auth required:\s*([^\s(]+)", vf.title)
+            _vh_match = re.search(r"Vhost auth required:\s*([^\s(]+)", vf.title)
             if _vh_match:
                 _vhost = _vh_match.group(1).strip()
                 commands.append(f"# [!] {_vhost} requires auth — try credential brute-forcing")

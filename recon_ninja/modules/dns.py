@@ -20,7 +20,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
-from recon_ninja.core.utils import module_guard
+from recon_ninja.core.utils import extract_line, module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ async def run_dns_module(
                                 f"is correctly configured to restrict AXFR."
                             ),
                             module=MODULE_NAME,
-                            evidence=_extract_line(stdout, "Transfer") or _extract_line(stdout, "XFR"),
+                            evidence=extract_line(stdout, "Transfer") or extract_line(stdout, "XFR"),
                         )
                     )
     else:
@@ -331,14 +331,6 @@ async def run_dns_module(
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
-
-
-def _extract_line(text: str, keyword: str) -> str:
-    """Return the first line from *text* containing *keyword*."""
-    for line in text.splitlines():
-        if keyword in line:
-            return line.strip()
-    return ""
 
 
 def _parse_axfr_output(output: str) -> list[str]:

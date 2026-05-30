@@ -218,7 +218,7 @@ async def run_vnc_module(
         module_name=MODULE_NAME,
         status="done",
         findings=findings,
-        raw_output=combined_output[:5000],
+        raw_output=combined_output[:10000],
         output_file=output_dir / "vnc_summary.txt",
         duration_seconds=elapsed,
     )

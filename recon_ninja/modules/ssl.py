@@ -464,10 +464,21 @@ async def run_ssl_module(
 
     # ------------------------------------------------------------------
     # Check for missing HSTS on HTTPS services (if not already detected)
+    # HSTS is an HTTP header and only applies to HTTPS services — not
+    # arbitrary SSL ports like SMTPS, LDAPS, IMAPS, etc.
     # ------------------------------------------------------------------
+    _HTTPS_PORTS = {443, 8443, 4443, 9443}
     hsts_already_flagged = any("HSTS" in f.title for f in findings)
     if not hsts_already_flagged:
         for port in ssl_ports:
+            svc = state.services.get(port)
+            service_name = (svc.service.lower() if svc else "")
+            is_https = (
+                port in _HTTPS_PORTS
+                or "http" in service_name
+            )
+            if not is_https:
+                continue
             findings.append(
                 Finding(
                     severity=Severity.INFO,

@@ -21,7 +21,7 @@ from recon_ninja.core.models import (
     Severity,
 )
 from recon_ninja.core.runner import run_tool
-from recon_ninja.core.utils import module_guard
+from recon_ninja.core.utils import extract_line, module_guard
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ async def run_smb_module(
                         title="SMB Anonymous Access Enabled",
                         description="The SMB server allows anonymous (null session) access.",
                         module=MODULE_NAME,
-                        evidence=_extract_line(stdout, "Anonymous"),
+                        evidence=extract_line(stdout, "Anonymous", case_insensitive=True),
                         suggested_commands=[f"smbclient -L //{target}/ -N -p {smb_port}"],
                     )
                 )
@@ -130,7 +130,7 @@ async def run_smb_module(
                         title="SMB Guest Access Enabled",
                         description="The SMB server allows guest access without authentication.",
                         module=MODULE_NAME,
-                        evidence=_extract_line(stdout, "Guest"),
+                        evidence=extract_line(stdout, "Guest", case_insensitive=True),
                         suggested_commands=[f"smbclient -L //{target}/ -U 'guest%' -p {smb_port}"],
                     )
                 )
@@ -271,7 +271,7 @@ async def run_smb_module(
                         title="MS17-010 EternalBlue Vulnerable",
                         description="The target is vulnerable to MS17-010 EternalBlue — unauthenticated RCE.",
                         module=MODULE_NAME,
-                        evidence=_extract_line(stdout, "VULNERABLE"),
+                        evidence=extract_line(stdout, "VULNERABLE", case_insensitive=True),
                         cve="CVE-2017-0144",
                         suggested_commands=["msfconsole -q -x 'use exploit/windows/smb/ms17_010_eternalblue'"],
                     )
@@ -284,7 +284,7 @@ async def run_smb_module(
                         title="CVE-2020-0796 SMBGhost Vulnerable",
                         description="The target is vulnerable to SMBGhost (CVE-2020-0796) — SMBv3 compression RCE.",
                         module=MODULE_NAME,
-                        evidence=_extract_line(stdout, "VULNERABLE"),
+                        evidence=extract_line(stdout, "VULNERABLE", case_insensitive=True),
                         cve="CVE-2020-0796",
                         suggested_commands=[
                             "msfconsole -q -x 'use exploit/windows/smb/cve_2020_0796_smbghost'"
@@ -334,7 +334,7 @@ async def run_smb_module(
                             title="SMB Null Session (CME)",
                             description="CrackMapExec confirmed null session access.",
                             module=MODULE_NAME,
-                            evidence=_extract_line(stdout, "(pwless)") or _extract_line(stdout, "null"),
+                            evidence=extract_line(stdout, "(pwless)", case_insensitive=True) or extract_line(stdout, "null", case_insensitive=True),
                         )
                     )
     else:
@@ -358,14 +358,6 @@ async def run_smb_module(
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
-
-
-def _extract_line(text: str, keyword: str) -> str:
-    """Return the first line from *text* containing *keyword* (case-insensitive)."""
-    for line in text.splitlines():
-        if keyword.lower() in line.lower():
-            return line.strip()
-    return ""
 
 
 def _parse_smbclient_shares(output: str) -> list[str]:

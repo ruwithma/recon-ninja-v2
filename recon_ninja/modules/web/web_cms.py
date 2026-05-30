@@ -77,15 +77,11 @@ API_ENDPOINTS: list[tuple[str, Severity, str]] = [
     ("/redoc", Severity.INFO, "ReDoc API docs"),
 ]
 
-#: Sensitive file paths to check (duplicated from dirfuzz but kept here
-#: for CMS-specific context and suggested_commands).
-SENSITIVE_FILES: list[tuple[str, Severity, str]] = [
-    ("/.git/HEAD", Severity.HIGH, "Git repository HEAD"),
-    ("/.git/config", Severity.HIGH, "Git repository config"),
-    ("/.env", Severity.CRITICAL, "Environment variables file"),
-    ("/config.php.bak", Severity.HIGH, "PHP configuration backup"),
-    ("/web.config", Severity.MEDIUM, "IIS web configuration"),
-]
+#: Sensitive file paths to check.  Only CMS-specific paths are listed here;
+#: generic sensitive paths (/.git/HEAD, /.env, /config.php.bak, /web.config)
+#: are already covered by web_dirfuzz's COMMON_PATHS and should NOT be
+#: duplicated here.
+SENSITIVE_FILES: list[tuple[str, Severity, str]] = []
 
 #: Application-server indicator paths.
 APP_SERVER_PATHS: dict[str, tuple[str, Severity, list[str]]] = {
@@ -403,7 +399,9 @@ async def _scan_joomla(
     if rc in (0, 1) and stdout.strip():
         for line in stdout.splitlines():
             line = line.strip()
-            if not line or line.startswith("[+]"):
+            if not line:
+                continue
+            if line.startswith("[+]"):
                 severity = Severity.INFO
                 if "vulnerability" in line.lower():
                     severity = Severity.MEDIUM
@@ -827,6 +825,6 @@ async def run_web_cms(
         module_name="web_cms",
         status="done",
         findings=findings,
-        raw_output=combined_raw[:8000],
+        raw_output=combined_raw[:10000],
         duration_seconds=time.monotonic() - t0,
     )

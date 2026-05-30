@@ -379,6 +379,6 @@ async def run_web_vuln(
         module_name="web_vuln",
         status="done",
         findings=findings,
-        raw_output=combined_raw[:8000],
+        raw_output=combined_raw[:10000],
         duration_seconds=time.monotonic() - t0,
     )

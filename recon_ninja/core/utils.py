@@ -11,6 +11,40 @@ from recon_ninja.core.models import ModuleResult
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Shared utility functions
+# ---------------------------------------------------------------------------
+
+
+def extract_line(text: str, keyword: str, case_insensitive: bool = False) -> str | None:
+    """Return the first line from *text* containing *keyword*.
+
+    Parameters
+    ----------
+    text:
+        Multi-line text to search.
+    keyword:
+        Substring to look for in each line.
+    case_insensitive:
+        If ``True``, performs a case-insensitive match.
+
+    Returns
+    -------
+    str | None
+        The stripped matching line, or ``None`` if no line contains *keyword*.
+    """
+    if case_insensitive:
+        keyword_lower = keyword.lower()
+        for line in text.splitlines():
+            if keyword_lower in line.lower():
+                return line.strip()
+    else:
+        for line in text.splitlines():
+            if keyword in line:
+                return line.strip()
+    return None
+
+
 def module_guard(timeout: float | None = None) -> Callable[[Callable[..., Coroutine[Any, Any, ModuleResult]]], Callable[..., Coroutine[Any, Any, ModuleResult]]]:
     """Decorator for module entrypoints to standardize error handling.
 

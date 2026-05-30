@@ -36,6 +36,7 @@ from recon_ninja.core.runner import run_tool
 from recon_ninja.core.utils import module_guard
 from recon_ninja.core.display import get_console
 from recon_ninja.utils.hosts import add_to_hosts, get_ip_for_hostname
+from recon_ninja.utils.network import is_root
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,15 @@ REQUIRED_SECURITY_HEADERS: dict[str, str] = {
     "x-frame-options": "X-Frame-Options",
     "x-content-type-options": "X-Content-Type-Options",
     "referrer-policy": "Referrer-Policy",
+}
+
+#: Metadata fields returned by whatweb that are not technology identifiers.
+#: These are filtered out when extracting the tech stack from whatweb output.
+_WHATWEB_METADATA_FIELDS: set[str] = {
+    "ip", "title", "country", "httpserver", "redirectlocation",
+    "cookies", "email", "uncommonheaders", "html5", "x-frame-options",
+    "x-xss-protection", "strict-transport-security", "x-powered-by",
+    "meta-author", "script", "frame", "passwordfield",
 }
 
 
@@ -157,12 +167,6 @@ def _parse_whatweb(raw: str) -> dict[str, str]:
     raw = ansi_escape.sub('', raw)
 
     tech: dict[str, str] = {}
-    _WHATWEB_METADATA_FIELDS = {
-        "ip", "title", "country", "httpserver", "redirectlocation",
-        "cookies", "email", "uncommonheaders", "html5", "x-frame-options",
-        "x-xss-protection", "strict-transport-security", "x-powered-by",
-        "meta-author", "script", "frame", "passwordfield",
-    }
 
     for line in raw.splitlines():
         # Strip URL and status code prefix
@@ -314,10 +318,7 @@ async def run_web_core(
                         or config.module_toggles.get("_htb", False)
                     )
                     if not auto_add:
-                        from recon_ninja.utils.network import (
-                            is_root as _is_root,
-                        )
-                        auto_add = _is_root()
+                        auto_add = is_root()
                     added_successfully = False
                     if auto_add:
                         if add_to_hosts(target, host):
@@ -574,8 +575,8 @@ async def run_web_core(
     # ------------------------------------------------------------------
     combined_raw = "\n\n".join(raw_parts)
     raw_len = len(combined_raw)
-    raw_truncated = combined_raw[:8000]
-    if raw_len > 8000:
+    raw_truncated = combined_raw[:10000]
+    if raw_len > 10000:
         raw_truncated += "\n[TRUNCATED]"
 
     return ModuleResult(

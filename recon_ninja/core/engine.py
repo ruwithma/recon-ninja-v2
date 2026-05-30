@@ -11,6 +11,7 @@ import json
 import logging
 import shutil
 import time
+import datetime as _dt
 from pathlib import Path
 from typing import Any, Callable
 
@@ -196,7 +197,7 @@ class ReconEngine:
             self.state.save()
             logger.debug("State saved after phase %d", phase_num)
 
-        self.state.end_time = self.state.end_time or __import__("datetime").datetime.now()
+        self.state.end_time = self.state.end_time or _dt.datetime.now()
         self.state.save()
         logger.info("=== ReconEngine finished for %s ===", self.target)
         return self.state
@@ -1091,7 +1092,7 @@ class ReconEngine:
         # Always write raw state.json for checkpoint / resume
         state_file = self.output_dir / "state.json"
         state_file.write_text(
-            __import__("json").dumps(self.state.to_dict(), indent=2),
+            json.dumps(self.state.to_dict(), indent=2),
             encoding="utf-8",
         )
         logger.info("State checkpoint → %s", state_file)

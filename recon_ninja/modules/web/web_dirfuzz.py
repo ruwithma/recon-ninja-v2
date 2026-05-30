@@ -37,6 +37,10 @@ from recon_ninja.core.models import (
 )
 from recon_ninja.core.runner import run_tool
 from recon_ninja.core.utils import module_guard
+from recon_ninja.core.display import get_console
+from recon_ninja.utils.hosts import add_to_hosts, get_ip_for_hostname
+from recon_ninja.utils.network import is_root
+from recon_ninja.utils.wordlists import get_dir_small_wordlist, resolve_wordlist
 
 logger = logging.getLogger(__name__)
 
@@ -416,13 +420,8 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
     )
     # Auto-add when running as root — typical CTF usage via sudo
     if not auto_add:
-        from recon_ninja.utils.network import is_root
         auto_add = is_root()
 
-    from recon_ninja.utils.hosts import (
-        add_to_hosts,
-        get_ip_for_hostname,
-    )
     already_mapped = get_ip_for_hostname(vhost) == target
 
     if auto_add and not already_mapped:
@@ -432,7 +431,6 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
                 " %s -> %s in /etc/hosts",
                 target, vhost,
             )
-            from recon_ninja.core.display import get_console
             get_console().print(
                 f"    [bold green][+][/] Auto-added "
                 f"[bold cyan]{vhost}[/] -> {target} "
@@ -440,7 +438,6 @@ def _register_vhost(vhost: str, target: str, state: ScanState, config: ReconConf
             )
     elif not already_mapped:
         # Not auto-added — print a clear hint for the user
-        from recon_ninja.core.display import get_console
         get_console().print(
             f"    [bold yellow][!][/] Vhost [bold cyan]{vhost}[/]"
             f" found but not in /etc/hosts"
@@ -550,7 +547,6 @@ async def run_web_dirfuzz(  # noqa: C901
     use_adaptive = config.adaptive_fuzz and not config.fast_mode
 
     # Resolve small directory wordlist for Stage 1
-    from recon_ninja.utils.wordlists import get_dir_small_wordlist
     seclists_base = config.module_toggles.get("_seclists_base")
     custom_dir = config.module_toggles.get("_custom_dir")
 
@@ -813,7 +809,6 @@ async def run_web_dirfuzz(  # noqa: C901
         stage1_vhost_wl = vhost_wordlist
         if use_adaptive_vhost and not passive_subdomains_found:
             # Resolve small subdomain list
-            from recon_ninja.utils.wordlists import resolve_wordlist
             seclists_base = config.module_toggles.get("_seclists_base")
             custom_dir = config.module_toggles.get("_custom_dir")
             small_dns = (
@@ -1102,6 +1097,6 @@ async def run_web_dirfuzz(  # noqa: C901
         module_name="web_dirfuzz",
         status="done",
         findings=findings,
-        raw_output=combined_raw[:8000],
+        raw_output=combined_raw[:10000],
         duration_seconds=time.monotonic() - t0,
     )

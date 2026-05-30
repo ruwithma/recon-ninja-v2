@@ -18,7 +18,9 @@ found, so CTF players can start working right away.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import shutil
 import time
 from pathlib import Path
@@ -86,7 +88,7 @@ def _print_fast_findings(findings: list[Finding], port: int, category: str) -> N
     # — these are CRITICAL for CTF players
     dir_findings = [
         f for f in findings
-        if f.title.startswith("Fuzz:") or f.title.startswith("Path found:")
+        if (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
         and f.severity == Severity.LOW
     ]
     for f in dir_findings[:10]:
@@ -264,9 +266,8 @@ async def _scan_port(
                     timeout=30,
                 )
                 if rc in (0, 1) and stdout.strip():
-                    import json as _json
                     try:
-                        data = _json.loads(stdout)
+                        data = json.loads(stdout)
                         results_list = (
                             data.get("RESULTS_EXPLOIT", [])
                             or data.get("RESULTS_SEARCH", [])
@@ -320,9 +321,8 @@ async def _scan_port(
                             timeout=30,
                         )
                         if brc in (0, 1) and bstdout.strip():
-                            import json as _json
                             try:
-                                bdata = _json.loads(bstdout)
+                                bdata = json.loads(bstdout)
                                 broad_results = (
                                     bdata.get("RESULTS_EXPLOIT", [])
                                     or bdata.get("RESULTS_SEARCH", [])
@@ -370,7 +370,7 @@ async def _scan_port(
         )
         for vf in vhost_findings[:5]:
             # Extract vhost hostname from the finding title
-            _vh_match = __import__("re").search(
+            _vh_match = re.search(
                 r"Vhost found:\s*([^\s]+)", vf.title,
             )
             if not _vh_match:
@@ -484,9 +484,8 @@ async def _scan_port(
                                     timeout=30,
                                 )
                                 if rc in (0, 1) and stdout.strip():
-                                    import json as _json
                                     try:
-                                        data = _json.loads(stdout)
+                                        data = json.loads(stdout)
                                         rlist = (
                                             data.get("RESULTS_EXPLOIT", [])
                                             or data.get("RESULTS_SEARCH", [])
@@ -529,9 +528,8 @@ async def _scan_port(
                                         timeout=30,
                                     )
                                     if brc in (0, 1) and bstdout.strip():
-                                        import json as _json
                                         try:
-                                            bdata = _json.loads(bstdout)
+                                            bdata = json.loads(bstdout)
                                             brlist = (
                                                 bdata.get("RESULTS_EXPLOIT", [])
                                                 or bdata.get("RESULTS_SEARCH", [])

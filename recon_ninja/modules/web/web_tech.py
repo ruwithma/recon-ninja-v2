@@ -44,6 +44,7 @@ from recon_ninja.core.models import (
 )
 from recon_ninja.core.runner import run_tool
 from recon_ninja.core.utils import module_guard
+from recon_ninja.modules.web.web_core import _WHATWEB_METADATA_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -513,13 +514,6 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
         "ModSecurity": ("waf", "certain"),
     }
 
-    _WHATWEB_METADATA_FIELDS = {
-        "ip", "title", "country", "httpserver", "redirectlocation",
-        "cookies", "email", "uncommonheaders", "html5", "x-frame-options",
-        "x-xss-protection", "strict-transport-security", "x-powered-by",
-        "meta-author", "script", "frame", "passwordfield",
-    }
-
     for line in raw.splitlines():
         # Strip URL and status code prefix
         line_clean = re.sub(r"^(?:https?://)?\S+\s+\[\d{3}(?:\s+[^\]]*)?\]", "", line, flags=re.IGNORECASE)
@@ -959,6 +953,6 @@ async def run_web_tech(
         module_name="web_tech",
         status="done",
         findings=findings,
-        raw_output=combined_raw[:8000],
+        raw_output=combined_raw[:10000],
         duration_seconds=time.monotonic() - t0,
     )

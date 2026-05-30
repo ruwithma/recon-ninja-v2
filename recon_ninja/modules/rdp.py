@@ -265,12 +265,12 @@ async def run_rdp_module(
     if shutil.which("xfreerdp"):
         tool_suggestions.append(f"xfreerdp /v:{target} /u:<USER> /p:<PASS> /cert:ignore")
     else:
-        tool_suggestions.append(f"xfreerdp /v:{target} /u:<USER> /p:<PASS> /cert:ignore")
+        tool_suggestions.append(f"# Install xfreerdp: apt install freerdp2-x11")
 
     if shutil.which("rdesktop"):
         tool_suggestions.append(f"rdesktop {target}")
     else:
-        tool_suggestions.append(f"rdesktop {target}")
+        tool_suggestions.append(f"# Install rdesktop: apt install rdesktop")
 
     findings.append(
         Finding(
@@ -294,7 +294,7 @@ async def run_rdp_module(
         module_name=MODULE_NAME,
         status="done",
         findings=findings,
-        raw_output=combined_output[:5000],
+        raw_output=combined_output[:10000],
         output_file=output_dir / "rdp_summary.txt",
         duration_seconds=elapsed,
     )
