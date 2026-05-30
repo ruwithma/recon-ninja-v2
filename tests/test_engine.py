@@ -171,7 +171,7 @@ class TestParseNmapXml:
         xml_file = tmp_path / "nmap_basic.xml"
         xml_file.write_text(xml, encoding="utf-8")
 
-        services = parse_nmap_xml(xml_file)
+        services, hostnames = parse_nmap_xml(xml_file)
         assert len(services) == 2
         assert 22 in services
         assert 80 in services
@@ -201,7 +201,7 @@ class TestParseNmapXml:
         xml_file = tmp_path / "nmap_scripts.xml"
         xml_file.write_text(xml, encoding="utf-8")
 
-        services = parse_nmap_xml(xml_file)
+        services, hostnames = parse_nmap_xml(xml_file)
         assert 80 in services
         assert "http-title" in services[80].scripts
         assert services[80].scripts["http-title"] == "Welcome to Apache"
@@ -229,17 +229,19 @@ class TestParseNmapXml:
         xml_file = tmp_path / "nmap_hostname.xml"
         xml_file.write_text(xml, encoding="utf-8")
 
-        services = parse_nmap_xml(xml_file)
+        services, hostnames = parse_nmap_xml(xml_file)
         assert 80 in services
         assert services[80].hostname == "dog.htb"
+        assert "dog.htb" in hostnames
 
     def test_parse_nmap_xml_malformed(self, tmp_path: Path) -> None:
         """Malformed XML returns empty dict."""
         xml_file = tmp_path / "bad.xml"
         xml_file.write_text("this is not xml <<<<>", encoding="utf-8")
 
-        services = parse_nmap_xml(xml_file)
+        services, hostnames = parse_nmap_xml(xml_file)
         assert services == {}
+        assert hostnames == []
 
 
 # ===================================================================

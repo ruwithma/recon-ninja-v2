@@ -53,18 +53,10 @@ class TestWebModuleOrchestration:
             captured["dirfuzz_hostname"] = hostname
             return ModuleResult(module_name="web_dirfuzz", status="done")
 
-        async def fake_run_web_vuln(target, port, url, state, config, output_dir):
-            return ModuleResult(module_name="web_vuln", status="done")
-
-        async def fake_run_web_cms(target, port, url, state, config, output_dir):
-            return ModuleResult(module_name="web_cms", status="done")
-
         with (
             patch("recon_ninja.modules.web.run_web_core", side_effect=fake_run_web_core),
             patch("recon_ninja.modules.web.run_web_tech", side_effect=fake_run_web_tech),
             patch("recon_ninja.modules.web.run_web_dirfuzz", side_effect=fake_run_web_dirfuzz),
-            patch("recon_ninja.modules.web.run_web_vuln", side_effect=fake_run_web_vuln),
-            patch("recon_ninja.modules.web.run_web_cms", side_effect=fake_run_web_cms),
         ):
             result = await run_web_module("10.129.7.81", state, config, tmp_path)
 
@@ -378,18 +370,10 @@ class TestRecursiveVhostScanQueue:
                 state.hostnames.append("models.smarthire.htb")
             return ModuleResult(module_name="web_dirfuzz", status="done")
 
-        async def fake_run_web_vuln(target, port, url, state, config, output_dir):
-            return ModuleResult(module_name="web_vuln", status="done")
-
-        async def fake_run_web_cms(target, port, url, state, config, output_dir):
-            return ModuleResult(module_name="web_cms", status="done")
-
         with (
             patch("recon_ninja.modules.web.run_web_core", side_effect=fake_run_web_core),
             patch("recon_ninja.modules.web.run_web_tech", side_effect=fake_run_web_tech),
             patch("recon_ninja.modules.web.run_web_dirfuzz", side_effect=fake_run_web_dirfuzz),
-            patch("recon_ninja.modules.web.run_web_vuln", side_effect=fake_run_web_vuln),
-            patch("recon_ninja.modules.web.run_web_cms", side_effect=fake_run_web_cms),
         ):
             result = await run_web_module("10.129.7.81", state, config, tmp_path)
 

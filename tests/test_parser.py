@@ -102,11 +102,42 @@ class TestParseNmapXml:
 
     def test_http_title_hostname(self, xml_file: Path) -> None:
         _, hostnames = parse_nmap_xml(xml_file)
-        assert "ReconNinja Dashboard" in hostnames
+        # "ReconNinja Dashboard" is a page title, not a hostname —
+        # it contains a space so it should be excluded by validation.
+        assert "ReconNinja Dashboard" not in hostnames
+        # The <hostname> element is still parsed correctly
+        assert "dc01.recon.local" in hostnames
 
     def test_hostname_element(self, xml_file: Path) -> None:
         _, hostnames = parse_nmap_xml(xml_file)
         assert "dc01.recon.local" in hostnames
+
+    def test_http_title_redirect_parsed(self, tmp_path: Path) -> None:
+        """nmap http-title outputs 'Did not follow redirect to http://X/'
+        — we should extract just the hostname 'X'."""
+        xml = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun>
+  <host>
+    <status state="up"/>
+    <address addr="10.129.10.71" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="80">
+        <state state="open"/>
+        <service name="http" product="nginx" version="1.18.0"/>
+        <script id="http-title" output="Did not follow redirect to http://smarthire.htb/"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>"""
+        p = tmp_path / "redirect.xml"
+        p.write_text(xml, encoding="utf-8")
+        services, hostnames = parse_nmap_xml(p)
+        # Should extract "smarthire.htb" not the full redirect message
+        assert "smarthire.htb" in hostnames
+        assert "Did not follow redirect" not in " ".join(hostnames)
+        # Also check the service hostname was set correctly
+        assert services[80].hostname == "smarthire.htb"
 
     def test_ssl_http_service(self, xml_file: Path) -> None:
         services, _ = parse_nmap_xml(xml_file)
