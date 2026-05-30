@@ -38,7 +38,7 @@ def module_guard(timeout: float | None = None) -> Callable[[Callable[..., Corout
 
                 if result is None:
                     logger.debug("[module_guard] %s returned None -> skipped", func.__name__)
-                    return ModuleResult(module_name=getattr(result, 'module_name', func.__name__), status="skipped", error_message="Module returned None")
+                    return ModuleResult(module_name=func.__name__, status="skipped", error_message="Module returned None")
 
                 # Ensure duration_seconds is set when missing
                 if getattr(result, 'duration_seconds', None) in (None, 0):

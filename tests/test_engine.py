@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock
 from datetime import datetime
 import pytest
 
-from recon_ninja.core.engine import ReconEngine, parse_nmap_xml, PHASE_NAMES
+from recon_ninja.core.engine import ReconEngine, PHASE_NAMES
+from recon_ninja.utils.nmap_parser import parse_nmap_xml
 from recon_ninja.core.models import ScanState, ServiceInfo, ReconConfig
 
 
