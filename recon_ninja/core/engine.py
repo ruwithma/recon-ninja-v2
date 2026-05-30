@@ -35,6 +35,23 @@ from recon_ninja.utils.nmap_parser import parse_nmap_xml
 
 logger = logging.getLogger(__name__)
 
+
+def _is_valid_hostname(name: str) -> bool:
+    """Check if a string looks like a valid hostname.
+
+    Filters out garbage like ``"Did not follow redirect to http://X/"``
+    that nmap's http-title script sometimes produces.
+    """
+    if not name:
+        return False
+    if " " in name or "/" in name or ":" in name:
+        return False
+    if "." not in name:
+        return False
+    if name.replace(".", "").isdigit():
+        return False
+    return True
+
 # ---------------------------------------------------------------------------
 # Phase names for logging
 # ---------------------------------------------------------------------------
@@ -136,11 +153,7 @@ class ReconEngine:
             (2, self.phase2_deep_scan),
             (3, self.phase3_modules),
             (4, self.phase4_osint),
-            # Phase 5 (vuln_correlate) disabled — searchsploit already
-            # runs inline during Phase 3 web module. Deep nikto/nuclei
-            # scans are disabled for fast CTF recon. Re-enable by
-            # uncommenting the line below and the web_vuln/web_cms imports.
-            # (5, self.phase5_vuln_correlate),
+            (5, self.phase5_vuln_correlate),
             (6, self.phase6_loot),
             (7, self.phase7_report),
         ]
@@ -369,10 +382,9 @@ class ReconEngine:
 
         if rc != 0 and not xml_out.exists():
             logger.error("Deep scan failed (rc=%d) and no XML output", rc)
-            # Don't return immediately — still create fallback services
-            # and classify the box so Phase 3 can proceed.
-            parsed_hostnames = []
-        elif xml_out.exists():
+            return
+
+        if xml_out.exists():
             services, parsed_hostnames = parse_nmap_xml(xml_out)
             self.state.services.update(services)
             logger.info("Parsed %d services from deep scan XML", len(services))
@@ -384,20 +396,20 @@ class ReconEngine:
             logger.warning("XML output file not found after deep scan")
             parsed_hostnames = []
 
-        # Fallback: if nmap XML parsing failed or returned no services,
-        # but Phase 1 discovered open ports, create basic ServiceInfo
-        # entries so that the port table displays correctly and Phase 3
-        # modules can identify which services to target.
-        if not self.state.services and self.state.open_ports:
-            logger.warning(
-                "nmap deep scan produced no service entries — "
-                "creating fallback entries from Phase 1 open ports"
-            )
-            self._create_fallback_services()
-
         # Detect hostnames from service info
         for svc in self.state.services.values():
             if svc.hostname:
+                # Validate hostname — skip garbage like
+                # "Did not follow redirect to http://X/"
+                if not _is_valid_hostname(svc.hostname):
+                    logger.warning(
+                        "Ignoring invalid hostname from nmap: %r",
+                        svc.hostname,
+                    )
+                    # Clear the garbage hostname so it doesn't
+                    # propagate into URL construction later
+                    svc.hostname = None
+                    continue
                 is_new = svc.hostname not in self.state.hostnames
                 self.state.add_hostname(svc.hostname)
                 if is_new:
@@ -430,7 +442,10 @@ class ReconEngine:
         # Also register hostnames extracted from <hostname> elements and
         # http-title script output by the parser
         for hname in parsed_hostnames:
-            if hname and hname not in self.state.hostnames:
+            if not hname or not _is_valid_hostname(hname):
+                logger.warning("Ignoring invalid hostname from parser: %r", hname)
+                continue
+            if hname not in self.state.hostnames:
                 self.state.add_hostname(hname)
                 auto_add = (
                     self.config.module_toggles.get("_add_hosts", False)
@@ -780,10 +795,11 @@ class ReconEngine:
     # ------------------------------------------------------------------
 
     async def phase5_vuln_correlate(self) -> None:
-        """Run searchsploit and nuclei against all detected versions.
+        """Run searchsploit against all detected versions.
 
         Also runs searchsploit against technologies detected by the
         web_tech module (stored in ``state.detected_techs``).
+        Deep scanners (nuclei, nikto) are excluded to keep scans fast.
 
         Skipped when ``config.skip_vuln_correlate`` is ``True``.
         """
@@ -828,32 +844,6 @@ class ReconEngine:
                             outfile,
                         ))
                         query_map[cmd_name] = query
-
-        # --- nuclei ---
-        if shutil.which("nuclei"):
-            # Build list of web targets to scan specific ports (e.g. port 3000)
-            web_targets = []
-            for port, svc in self.state.services.items():
-                url = svc.url
-                if url:
-                    web_targets.append(url.replace("TARGET", self.target))
-
-            if not web_targets:
-                web_targets = [self.target]
-
-            nuclei_cmd = ["nuclei"]
-            for wt in web_targets:
-                nuclei_cmd.extend(["-u", wt])
-
-            nuclei_cmd.extend([
-                "-severity", "critical,high,medium",
-                "-tags", "cve,exposure,misconfig",
-                "-exclude-tags", "fuzz,headless,dos,misc,tokens",
-                "-jsonl", "-o", str(self.output_dir / "nuclei.txt"),
-            ])
-            if self.config.nuclei_templates:
-                nuclei_cmd.extend(["-t", self.config.nuclei_templates])
-            commands.append(("nuclei", nuclei_cmd, self.output_dir / "nuclei.txt"))
 
         if not commands:
             logger.info("No vulnerability correlation tools available")
@@ -934,31 +924,10 @@ class ReconEngine:
                             except Exception:
                                 logger.debug("Broad searchsploit fallback failed for %s", broad_query)
                     logger.info("searchsploit ran: %s (no exploits found)", name)
-            if name == "nuclei":
-                content = ""
-                outfile = self.output_dir / "nuclei.txt"
-                if outfile.is_file():
-                    try:
-                        content = outfile.read_text(encoding="utf-8", errors="replace")
-                    except Exception:
-                        content = stdout
-                else:
-                    content = stdout
 
-                if content.strip():
-                    from recon_ninja.modules.vuln_correlate import _parse_nuclei_output
-                    findings = _parse_nuclei_output(content)
-                    for f in findings:
-                        f.module = "vuln_correlate"
-                        self.state.add_finding(f)
-
-        # Display exploit results prominently (from both web module and vuln_correlate)
+        # Display exploit results prominently
         if not self.quiet:
-            exploit_findings = [
-                f for f in self.state.all_findings
-                if f.module == "vuln_correlate"
-                or (f.module == "web" and ("exploit" in f.title.lower() or "Exploits" in f.title))
-            ]
+            exploit_findings = [f for f in self.state.all_findings if f.module == "vuln_correlate"]
             if exploit_findings:
                 from recon_ninja.core.display import display_exploit_results
                 display_exploit_results(exploit_findings)
@@ -1484,77 +1453,6 @@ class ReconEngine:
     # ------------------------------------------------------------------
     # Script-based service supplementation
     # ------------------------------------------------------------------
-
-    def _create_fallback_services(self) -> None:
-        """Create basic ServiceInfo entries from known open ports.
-
-        Called when the nmap deep scan XML parsing fails or returns no
-        services, but Phase 1 (RustScan / nmap fast scan) already
-        discovered open ports.  Without this fallback the port table
-        shows "No open ports discovered" and Phase 3 modules may not
-        trigger correctly.
-
-        Common port → service name mappings are used to populate the
-        ``service`` field so that downstream code (e.g. ``_classify_box``,
-        ``_determine_modules``) can make reasonable decisions.
-        """
-        _COMMON_PORTS: dict[int, str] = {
-            21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp",
-            53: "dns", 80: "http", 110: "pop3", 111: "rpcbind",
-            135: "msrpc", 139: "netbios-ssn", 143: "imap",
-            389: "ldap", 443: "https", 445: "microsoft-ds",
-            993: "imaps", 995: "pop3s", 1433: "ms-sql-s",
-            3306: "mysql", 3389: "ms-wbt-server", 5432: "postgresql",
-            5900: "vnc", 5985: "wsman", 5986: "wsmans",
-            6379: "redis", 8080: "http-proxy", 8443: "https-alt",
-            27017: "mongodb",
-        }
-
-        # Also try to infer service names from nmap deep scan text output
-        text_out = self.output_dir / "nmap_deep.txt"
-        text_services: dict[int, tuple[str, str, str]] = {}  # port → (service, product, version)
-        if text_out.exists():
-            import re as _re
-            # Match lines like: "22/tcp  open  ssh     OpenSSH 8.9p1"
-            _NMAP_TEXT_RE = _re.compile(
-                r"^(\d+)/(tcp|udp)\s+open\s+(\S+)\s+(.*?)$", _re.MULTILINE
-            )
-            try:
-                content = text_out.read_text(encoding="utf-8", errors="replace")
-                for m in _NMAP_TEXT_RE.finditer(content):
-                    port_num = int(m.group(1))
-                    svc_name = m.group(3).strip()
-                    product_ver = m.group(4).strip()
-                    # Split product and version at the first space if possible
-                    parts = product_ver.split(None, 1)
-                    product = parts[0] if parts else ""
-                    version = parts[1] if len(parts) > 1 else ""
-                    text_services[port_num] = (svc_name, product, version)
-            except Exception:
-                logger.debug("Failed to parse nmap_deep.txt for fallback services")
-
-        for port in self.state.open_ports:
-            if port in self.state.services:
-                continue  # Already have service info for this port
-
-            # Prefer text output if available, then common port map
-            if port in text_services:
-                svc_name, product, version = text_services[port]
-            else:
-                svc_name = _COMMON_PORTS.get(port, "unknown")
-                product = ""
-                version = ""
-
-            info = ServiceInfo(
-                port=port,
-                proto="tcp",
-                state="open",
-                service=svc_name,
-                product=product,
-                version=version,
-            )
-            self.state.services[port] = info
-            logger.debug("Created fallback ServiceInfo for port %d: %s", port, svc_name)
 
     @staticmethod
     def _supplement_scripts(services: dict[int, ServiceInfo]) -> None:

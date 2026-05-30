@@ -31,15 +31,6 @@ _DIR_WORDLIST_CANDIDATES: list[str] = [
     "Discovery/Web-Content/directory-list-2.3-medium.txt",
 ]
 
-#: Content/file wordlist candidates — these include common page names
-#: like "login", "contact", "signup" that directory wordlists miss.
-_CONTENT_WORDLIST_CANDIDATES: list[str] = [
-    "Discovery/Web-Content/raft-medium-words-lowercase.txt",
-    "Discovery/Web-Content/raft-medium-words.txt",
-    "Discovery/Web-Content/common.txt",
-    "Discovery/Web-Content/combined/combined_words.txt",
-]
-
 _VHOST_WORDLIST_CANDIDATES: list[str] = [
     "Discovery/DNS/subdomains-top1million-5000.txt",
     "Discovery/DNS/subdomains-top1million-110000.txt",
@@ -188,34 +179,6 @@ def get_dir_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path 
     return _resolve_first(_DIR_WORDLIST_CANDIDATES, seclists_base, custom_dir)
 
 
-def get_content_wordlist(seclists_base: str, custom_dir: str | None = None) -> Path | None:
-    """Return a content/page wordlist from SecLists.
-
-    Unlike directory wordlists, content wordlists include common page names
-    like "login", "contact", "signup" that CTF players need.  Used as a
-    secondary feroxbuster pass to catch pages the directory wordlist misses.
-
-    Priority order:
-      1. ``raft-medium-words-lowercase``
-      2. ``raft-medium-words``
-      3. ``common``
-      4. ``combined_words``
-
-    Parameters
-    ----------
-    seclists_base : str
-        Root directory of the SecLists collection.
-    custom_dir : str | None
-        Optional custom directory.
-
-    Returns
-    -------
-    Path | None
-        Path to the first available content wordlist, or ``None``.
-    """
-    return _resolve_first(_CONTENT_WORDLIST_CANDIDATES, seclists_base, custom_dir)
-
-
 def get_dir_small_wordlist(
     seclists_base: str, custom_dir: str | None = None,
 ) -> Path | None:
@@ -307,7 +270,6 @@ __all__: list[str] = [
     "resolve_wordlist",
     "find_seclists",
     "get_dir_wordlist",
-    "get_content_wordlist",
     "get_dir_small_wordlist",
     "get_vhost_wordlist",
     "get_username_wordlist",

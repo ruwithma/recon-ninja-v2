@@ -1,17 +1,18 @@
 """Web reconnaissance module — top-level orchestrator.
 
 This is the entry point imported by :mod:`recon_ninja.core.engine`.  It
-iterates over every HTTP/HTTPS port discovered during Phase 2, constructs
+iterates over every HTTP/HTTPS port discovered in Phase 2, constructs
 the appropriate URL, and then runs the sub-modules:
 
     web_core  →  web_tech  →  web_dirfuzz
 
-**CTF-first design**: directory fuzzing and vhost enumeration run with
-aggressive timeouts (120s max). Quick searchsploit lookups on detected
-tech versions provide instant exploit intelligence.
+**CTF-first design**: Only fast, actionable modules are run — directory
+fuzzing, vhost enumeration, tech detection, and quick exploit lookup.
+Deep vuln scanners (nikto, nuclei, cms) are excluded to keep scans
+fast and focused for CTF workflows.
 
-**Fast results only**: Deep vuln scanners (nikto, nuclei, CMS) are
-disabled for now. Focus is on speed and actionable CTF intel.
+**Priority output**: All results are printed IMMEDIATELY as they are
+found, so CTF players can start working right away.
 """
 
 from __future__ import annotations
@@ -33,14 +34,31 @@ from recon_ninja.core.models import (
 from recon_ninja.modules.web.web_core import run_web_core
 from recon_ninja.modules.web.web_tech import run_web_tech
 from recon_ninja.modules.web.web_dirfuzz import run_web_dirfuzz
-# Deep vuln scans disabled for now — focus on fast CTF recon:
-# from recon_ninja.modules.web.web_vuln import run_web_vuln
-# from recon_ninja.modules.web.web_cms import run_web_cms
 from recon_ninja.core.utils import module_guard
 from recon_ninja.core.display import get_console
 from recon_ninja.core.runner import run_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _is_valid_hostname(name: str) -> bool:
+    """Check if a string looks like a valid hostname.
+
+    Filters out garbage like ``"Did not follow redirect to http://X/"``
+    that nmap's http-title script sometimes produces.
+    """
+    if not name:
+        return False
+    # Must not contain spaces, slashes, or protocol indicators
+    if " " in name or "/" in name or ":" in name:
+        return False
+    # Must contain at least one dot (for FQDN)
+    if "." not in name:
+        return False
+    # Must not be all digits (IP without dots, or similar)
+    if name.replace(".", "").isdigit():
+        return False
+    return True
 
 
 def _rebuild_url_with_hostname(url: str, hostname: str, port: int) -> str:
@@ -68,7 +86,7 @@ def _print_fast_findings(findings: list[Finding], port: int, category: str) -> N
     # — these are CRITICAL for CTF players
     dir_findings = [
         f for f in findings
-        if (f.title.startswith("Fuzz:") or f.title.startswith("Path found:"))
+        if f.title.startswith("Fuzz:") or f.title.startswith("Path found:")
         and f.severity == Severity.LOW
     ]
     for f in dir_findings[:10]:
@@ -94,12 +112,12 @@ async def _scan_port(
     config: ReconConfig,
     output_dir: Path,
 ) -> list[ModuleResult]:
-    """Execute the full sub-module pipeline for a single HTTP port.
+    """Execute the fast sub-module pipeline for a single HTTP port.
 
     Steps 1-2 (web_core, web_tech) run sequentially because web_tech
     needs headers from web_core.  Step 3 (web_dirfuzz) runs next to
-    produce actionable results FAST.  Steps 4-5 (web_vuln, web_cms)
-    run concurrently after dirs are found.
+    produce actionable results FAST.  Deep vuln scans (nikto, nuclei,
+    cms) are excluded to keep scans fast for CTF workflows.
 
     Parameters
     ----------
@@ -142,10 +160,10 @@ async def _scan_port(
     results.append(core_result)
 
     # After web_core: check if a new hostname was discovered via redirect.
-    # If so, rebuild the URL so feroxbuster/nikto/etc use the hostname
+    # If so, rebuild the URL so feroxbuster uses the hostname
     # instead of the raw IP (which may 301-redirect everything).
     refreshed_hostname = state.primary_hostname
-    if refreshed_hostname and refreshed_hostname != hostname:
+    if refreshed_hostname and _is_valid_hostname(refreshed_hostname) and refreshed_hostname != hostname:
         logger.info(
             "[web:%d] Hostname discovered: %s — rebuilding URL",
             port, refreshed_hostname,
@@ -195,14 +213,10 @@ async def _scan_port(
                 f"[bold cyan]{len(dir_findings)}[/] directories/files"
             )
             sorted_dirs = sorted(dir_findings, key=lambda f: f.severity.rank)
-            for f in sorted_dirs[:20]:
+            for f in sorted_dirs[:10]:
                 sev_style = f.severity.rich_style
                 console.print(
                     f"      [{sev_style}]•[/] {f.title}"
-                )
-            if len(sorted_dirs) > 20:
-                console.print(
-                    f"      [dim]... and {len(sorted_dirs) - 20} more[/]"
                 )
         if vhost_findings:
             console.print(
@@ -545,7 +559,7 @@ async def _scan_port(
             except Exception as exc:
                 logger.debug("[web:%d] Vhost tech scan failed for %s: %s", port, _vhost_name, exc)
 
-    # Print a clear completion message
+    # Print a clear separator so CTF players know they can start working
     console.print(
         f"    [bold bright_green]⚡ Web scan on port {port} complete![/]"
     )
@@ -627,9 +641,14 @@ async def run_web_module(
             scheme = "https" if (port in (443, 8443) or "ssl" in svc.service.lower()) else "http"
 
             hosts_to_scan = []
-            if svc.hostname:
+            if svc.hostname and _is_valid_hostname(svc.hostname):
                 hosts_to_scan.append(svc.hostname)
-            if state.primary_hostname and state.primary_hostname not in hosts_to_scan:
+            elif svc.hostname:
+                logger.warning(
+                    "[web:%d] Ignoring invalid hostname from nmap: %r",
+                    port, svc.hostname,
+                )
+            if state.primary_hostname and _is_valid_hostname(state.primary_hostname) and state.primary_hostname not in hosts_to_scan:
                 hosts_to_scan.append(state.primary_hostname)
             if not hosts_to_scan:
                 hosts_to_scan.append(target)

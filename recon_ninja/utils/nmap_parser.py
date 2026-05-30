@@ -119,7 +119,23 @@ def parse_nmap_xml(
                 # Extract hostname from http-title script
                 if script_id == "http-title" and script_output:
                     title = script_output.strip()
-                    if title and "." in title and not title.replace(".", "").isdigit():
+                    # Handle nmap redirect messages like:
+                    # "Did not follow redirect to http://smarthire.htb/"
+                    redirect_match = re.search(
+                        r"redirect\s+to\s+https?://([^/:]+)",
+                        title, re.IGNORECASE,
+                    )
+                    if redirect_match:
+                        title = redirect_match.group(1)
+                    # Validate: must look like a hostname (has dots,
+                    # not all digits, no spaces, no slashes)
+                    if (
+                        title
+                        and "." in title
+                        and not title.replace(".", "").isdigit()
+                        and " " not in title
+                        and "/" not in title
+                    ):
                         if title not in hostnames:
                             http_title_hostnames.append(title)
 

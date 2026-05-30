@@ -518,10 +518,6 @@ def _detect_from_whatweb(raw: str, port: int) -> list[TechInfo]:
         "cookies", "email", "uncommonheaders", "html5", "x-frame-options",
         "x-xss-protection", "strict-transport-security", "x-powered-by",
         "meta-author", "script", "frame", "passwordfield",
-        # HTTP headers that whatweb detects but are NOT technologies
-        "www-authenticate", "x-content-type-options", "referrer-policy",
-        "content-security-policy", "set-cookie", "x-request-id",
-        "x-robots-tag", "x-generator",
     }
 
     for line in raw.splitlines():
