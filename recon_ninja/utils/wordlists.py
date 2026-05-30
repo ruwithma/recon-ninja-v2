@@ -44,6 +44,7 @@ _USERNAME_WORDLIST_CANDIDATES: list[str] = [
 ]
 
 _SNMP_WORDLIST_CANDIDATES: list[str] = [
+    "Discovery/SNMP/snmp.txt",
     "Misc/wordlists-common/snmp.txt",
     "Discovery/SNMP/common-snmp-community-strings.txt",
 ]
@@ -132,9 +133,10 @@ def find_seclists() -> str | None:
             # known subdirectory.
             if (p / "Discovery").is_dir() or (p / "Usernames").is_dir():
                 return candidate
-            # If the dir exists but lacks the expected layout, still
-            # return it – the user may have a custom structure.
-            return candidate
+            # If the dir exists but lacks the expected layout, skip it.
+            # It's likely not actually SecLists and would cause confusing
+            # path resolution failures downstream.
+            continue
     return None
 
 

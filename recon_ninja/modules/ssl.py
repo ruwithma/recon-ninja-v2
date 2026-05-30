@@ -457,7 +457,8 @@ async def run_ssl_module(
     # ------------------------------------------------------------------
     for hostname in discovered_hostnames:
         # Clean up wildcards for state purposes
-        clean_hostname = hostname.lstrip("*.")
+        import re as _re
+        clean_hostname = _re.sub(r'^\*+\.', '', hostname)
         if clean_hostname and clean_hostname not in state.hostnames:
             state.add_hostname(clean_hostname)
             logger.info("SSL cert discovery: added hostname %s", clean_hostname)

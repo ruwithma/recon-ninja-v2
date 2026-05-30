@@ -24,6 +24,7 @@ from recon_ninja.core.display import (
 )
 from recon_ninja.core.models import (
     Finding,
+    KNOWN_WEB_PORTS,
     ModuleResult,
     ReconConfig,
     ScanState,
@@ -238,8 +239,8 @@ class ReconEngine:
             top_ports = "1000" if self.config.fast_mode else "10000"
 
             # Dynamically calculate ulimit and batch size to prevent OS permission/resource errors
-            import resource
             try:
+                import resource
                 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
             except Exception:
                 soft, hard = 1024, 1024
@@ -951,7 +952,6 @@ class ReconEngine:
         """
         exploits: list[str] = []
         try:
-            import json
             data = json.loads(stdout)
             results = (
                 data.get("RESULTS_EXPLOIT", [])
@@ -1052,10 +1052,14 @@ class ReconEngine:
 
         if not self.quiet:
             loot_counts = {}
-            for result in self.state.module_results:
-                if result.module_name == "loot" and result.findings:
-                    for f in result.findings:
-                        loot_counts[f.title.replace("Loot: ", "")] = int(f.description.split()[1]) if f.description else 0
+            for f in self.state.all_findings:
+                if f.module == "loot" and f.title.startswith("Loot: "):
+                    category = f.title.replace("Loot: ", "")
+                    try:
+                        count = int(f.description.split()[1])
+                    except (IndexError, ValueError):
+                        count = 0
+                    loot_counts[category] = count
             if loot_counts:
                 display_loot_summary(loot_counts)
 
@@ -1096,62 +1100,6 @@ class ReconEngine:
             encoding="utf-8",
         )
         logger.info("State checkpoint → %s", state_file)
-
-    def _build_markdown_report(self) -> list[str]:
-        """Build a Markdown report as a list of lines."""
-        lines: list[str] = [
-            "# ReconNinja — Scan Report",
-            "",
-            f"**Target:** {self.target}",
-            f"**Box Profile:** {self.state.box_profile}",
-            f"**Duration:** {self.state.duration:.1f}s",
-            f"**Open Ports:** {', '.join(str(p) for p in self.state.open_ports) or 'None'}",
-            f"**Hostnames:** {', '.join(self.state.hostnames) or 'None'}",
-            "",
-            "## Services",
-            "",
-        ]
-
-        for port, svc in sorted(self.state.services.items()):
-            lines.append(
-                f"- **Port {port}/{svc.proto}** — {svc.service} "
-                f"| {svc.display_product} "
-                f"| State: {svc.state}"
-            )
-            if svc.scripts:
-                for script_id, output in svc.scripts.items():
-                    lines.append(f"  - Script `{script_id}`: {output[:200]}")
-
-        lines.append("")
-        lines.append("## Findings")
-        lines.append("")
-
-        by_sev = self.state.findings_by_severity()
-        for sev in Severity:
-            findings = by_sev.get(sev, [])
-            if not findings:
-                continue
-            lines.append(f"### {sev.value} ({len(findings)})")
-            lines.append("")
-            for f in findings:
-                lines.append(f"- **[{f.module}]** {f.title}")
-                if f.description:
-                    lines.append(f"  > {f.description[:300]}")
-            lines.append("")
-
-        if self.state.module_results:
-            lines.append("## Module Results")
-            lines.append("")
-            for mr in self.state.module_results:
-                lines.append(
-                    f"- **{mr.module_name}** — {mr.status} "
-                    f"({mr.duration_seconds:.1f}s)"
-                )
-                if mr.error_message:
-                    lines.append(f"  > Error: {mr.error_message[:200]}")
-            lines.append("")
-
-        return lines
 
     # ------------------------------------------------------------------
     # Module determination
@@ -1297,13 +1245,7 @@ class ReconEngine:
         def has_service(name: str) -> bool:
             return any(name in sn for sn in service_names)
 
-        # Common web ports that nmap may misidentify (e.g. port 3000 → "ppp")
-        _KNOWN_WEB_PORTS = {
-            80, 443, 8080, 8443,
-            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
-            8888, 9000, 9090, 4443,
-        }
-        has_web_port = bool(port_set.intersection(_KNOWN_WEB_PORTS))
+        has_web_port = bool(port_set.intersection(KNOWN_WEB_PORTS))
 
         # Web: any port with "http" service OR a known web port number
         if has_service("http") or has_web_port:
@@ -1414,19 +1356,12 @@ class ReconEngine:
             svc.service.lower() for svc in self.state.services.values()
         }
 
-        # Common web ports — nmap sometimes misidentifies these
-        _KNOWN_WEB_PORTS = {
-            80, 443, 8080, 8443,
-            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
-            8888, 9000, 9090, 4443,
-        }
-
         has_kerberos = 88 in port_set
         has_ldap = bool(port_set.intersection({389, 636}))
         has_smb = bool(port_set.intersection({139, 445}))
         has_winrm = bool(port_set.intersection({5985, 5986}))
         has_ssh = 22 in port_set
-        has_http = bool(port_set.intersection(_KNOWN_WEB_PORTS)) or "http" in service_names
+        has_http = bool(port_set.intersection(KNOWN_WEB_PORTS)) or "http" in service_names
         has_iis = any("iis" in p for p in service_products)
 
         # WINDOWS_AD: ports 88 + 389 + 445 + (5985 or 139)

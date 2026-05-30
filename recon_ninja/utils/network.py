@@ -149,7 +149,11 @@ def is_root() -> bool:
     bool
         ``True`` if the effective user ID is 0.
     """
-    return os.geteuid() == 0
+    try:
+        return os.geteuid() == 0
+    except AttributeError:
+        # os.geteuid() is not available on non-Unix platforms (e.g. Windows)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +183,13 @@ def get_local_ip(interface: str = "tun0") -> str | None:
 # Private IP check
 # ---------------------------------------------------------------------------
 
+_PRIVATE_NETWORKS = [
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+]
+
+
 def is_private_ip(ip: str) -> bool:
     """Check whether an IP address falls within RFC 1918 private ranges.
 
@@ -202,13 +213,7 @@ def is_private_ip(ip: str) -> bool:
     except ipaddress.AddressValueError:
         return False
 
-    private_networks = [
-        ipaddress.IPv4Network("10.0.0.0/8"),
-        ipaddress.IPv4Network("172.16.0.0/12"),
-        ipaddress.IPv4Network("192.168.0.0/16"),
-    ]
-
-    return any(addr in net for net in private_networks)
+    return any(addr in net for net in _PRIVATE_NETWORKS)
 
 
 # ---------------------------------------------------------------------------

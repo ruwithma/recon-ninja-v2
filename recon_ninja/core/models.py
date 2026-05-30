@@ -8,6 +8,34 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
+import re
+
+# Shared constant: well-known web service ports.
+# Used by ServiceInfo.url, ScanState.web_ports, report._service_group, etc.
+KNOWN_WEB_PORTS: set[int] = {
+    80, 443, 8080, 8443,  # standard
+    3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,  # dev/app servers
+    8888, 9000, 9090, 4443,  # other common web ports
+}
+
+# Pre-compiled patterns for cross-module dedup in ScanState.add_finding
+_DUP_PATTERNS_COMPILED = [
+    re.compile(pat, re.IGNORECASE)
+    for pat in [
+        r"missing\s+\d+\s+security\s+headers",
+        r"missing\s+security\s+header",
+        r"content-security-policy",
+        r"strict-transport-security",
+        r"x-frame-options",
+        r"x-content-type-options",
+        r"referrer-policy",
+        r"permissions-policy",
+        r"waf\s+detected",
+        r"server\s+banner",
+    ]
+]
+_URL_RE = re.compile(r"https?://[^\s/]+")
+_NONALNUM_RE = re.compile(r"[^a-z0-9]")
 
 
 class Severity(str, Enum):
@@ -166,13 +194,7 @@ class ServiceInfo:
             scheme = "https" if "ssl" in self.service or self.port in (443, 8443) else "http"
             return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
 
-        # Common web ports that nmap sometimes misidentifies (e.g. port 3000 → "ppp")
-        _KNOWN_WEB_PORTS = {
-            80, 443, 8080, 8443,  # standard
-            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,  # dev/app servers
-            8888, 9000, 9090, 4443,  # other common web ports
-        }
-        if self.port in _KNOWN_WEB_PORTS:
+        if self.port in KNOWN_WEB_PORTS:
             scheme = "https" if self.port in (443, 8443, 4443) else "http"
             return f"{scheme}://{self.hostname or 'TARGET'}:{self.port}"
 
@@ -337,33 +359,13 @@ class ScanState:
         # Cross-module dedup: only for known duplicate patterns that
         # flood the output.  We check for specific keywords rather than
         # doing generic fuzzy matching (which is too aggressive).
-        import re as _re
-
-        # Patterns that are commonly duplicated across modules
-        _DUP_PATTERNS = [
-            r"missing\s+\d+\s+security\s+headers",
-            r"missing\s+security\s+header",
-            r"content-security-policy",
-            r"strict-transport-security",
-            r"x-frame-options",
-            r"x-content-type-options",
-            r"referrer-policy",
-            r"permissions-policy",
-            r"waf\s+detected",
-            r"server\s+banner",
-        ]
-
         finding_lower = finding.title.lower()
-        is_dup_candidate = any(
-            _re.search(pat, finding_lower) for pat in _DUP_PATTERNS
-        )
+        is_dup_candidate = any(pat.search(finding_lower) for pat in _DUP_PATTERNS_COMPILED)
 
         if is_dup_candidate:
             # Normalize for comparison
-            finding_norm = _re.sub(
-                r"https?://[^\s/]+", "", finding_lower,
-            )
-            finding_norm = _re.sub(r"[^a-z0-9]", "", finding_norm)
+            finding_norm = _URL_RE.sub("", finding_lower)
+            finding_norm = _NONALNUM_RE.sub("", finding_norm)
             # Remove module-specific prefixes
             for prefix in ("nikto", "nuclei", "webcore", "webvuln",
                            "webdirfuzz", "webtech"):
@@ -371,10 +373,8 @@ class ScanState:
 
             for existing in self.all_findings:
                 existing_lower = existing.title.lower()
-                existing_norm = _re.sub(
-                    r"https?://[^\s/]+", "", existing_lower,
-                )
-                existing_norm = _re.sub(r"[^a-z0-9]", "", existing_norm)
+                existing_norm = _URL_RE.sub("", existing_lower)
+                existing_norm = _NONALNUM_RE.sub("", existing_norm)
                 for prefix in ("nikto", "nuclei", "webcore", "webvuln",
                                "webdirfuzz", "webtech"):
                     existing_norm = existing_norm.replace(prefix, "")
@@ -425,16 +425,10 @@ class ScanState:
         Includes ports detected as HTTP by nmap service name AND
         common web ports that nmap sometimes misidentifies.
         """
-        # Common web ports that nmap may misidentify
-        _KNOWN_WEB_PORTS = {
-            80, 443, 8080, 8443,  # standard
-            3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,  # dev/app servers
-            8888, 9000, 9090, 4443,  # other common web ports
-        }
         return [
             port
             for port, svc in self.services.items()
-            if "http" in svc.service.lower() or port in _KNOWN_WEB_PORTS
+            if "http" in svc.service.lower() or port in KNOWN_WEB_PORTS
         ]
 
     @property

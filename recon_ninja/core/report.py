@@ -34,7 +34,7 @@ from typing import Any
 import aiofiles
 from jinja2 import BaseLoader, Environment
 
-from recon_ninja.core.models import Finding, ScanState, ServiceInfo, Severity
+from recon_ninja.core.models import Finding, KNOWN_WEB_PORTS, ScanState, ServiceInfo, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -669,11 +669,7 @@ def _service_group(service: str, port: int = 0) -> str:
     if "http" in svc or "ssl/http" in svc:
         return "Web"
     # Common web ports that nmap misidentifies (e.g. port 3000 → "ppp")
-    _KNOWN_WEB_PORTS = {
-        3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
-        8888, 9000, 9090,
-    }
-    if port in _KNOWN_WEB_PORTS:
+    if port in KNOWN_WEB_PORTS:
         return "Web"
     if "smb" in svc or "microsoft-ds" in svc or "netbios" in svc:
         return "SMB"
@@ -1055,14 +1051,9 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
         commands.append(f"hydra -l root -P /usr/share/wordlists/rockyou.txt ssh://{target}")
 
     # --- Web ---
-    _KNOWN_WEB_PORTS = {
-        80, 443, 8080, 8443,
-        3000, 3001, 4000, 5000, 8000, 8001, 8081, 8082, 8088,
-        8888, 9000, 9090, 4443,
-    }
     web_ports = []
     for p in state.open_ports:
-        if p in _KNOWN_WEB_PORTS:
+        if p in KNOWN_WEB_PORTS:
             web_ports.append(p)
         elif p in services and "http" in services[p].service.lower():
             web_ports.append(p)

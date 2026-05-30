@@ -380,8 +380,8 @@ async def _check_path(  # noqa: C901
 
         # Path exists — adjust severity
         actual_sev = _severity_for_status(status, path)
-        if actual_sev.rank > severity.rank:
-            # Use the more severe of (default, status-based)
+        # Use the more severe of (default, status-based) — lower rank = more severe
+        if severity.rank < actual_sev.rank:
             actual_sev = severity
 
         return Finding(

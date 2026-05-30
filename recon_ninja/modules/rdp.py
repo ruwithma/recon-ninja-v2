@@ -92,17 +92,17 @@ async def run_rdp_module(
 
     rdp_port = _get_rdp_port(state)
 
-    # ── 1. nmap RDP encryption & MS12-020 check ─────────────────────────
+    # ── 1. nmap RDP encryption, MS12-020 & BlueKeep check ───────────────
     if shutil.which("nmap"):
-        nmap_enc_out = output_dir / "rdp_nmap_encryption.txt"
+        nmap_out = output_dir / "rdp_nmap.txt"
         rc, stdout, stderr = await run_tool(
             cmd=[
                 "nmap",
                 f"-p{rdp_port}",
-                "--script", "rdp-enum-encryption,rdp-vuln-ms12-020",
+                "--script", "rdp-enum-encryption,rdp-vuln-ms12-020,rdp-vuln-ms19-0708",
                 target,
             ],
-            output_file=nmap_enc_out,
+            output_file=nmap_out,
             timeout=config.default_timeout,
         )
         raw_outputs.append(stdout or stderr)
@@ -201,25 +201,8 @@ async def run_rdp_module(
                             module=MODULE_NAME,
                         )
                     )
-    else:
-        logger.warning("nmap not found — skipping RDP encryption & MS12-020 checks")
 
-    # ── 2. nmap BlueKeep check (CVE-2019-0708) ─────────────────────────
-    if shutil.which("nmap"):
-        bluekeep_out = output_dir / "rdp_nmap_bluekeep.txt"
-        rc, stdout, stderr = await run_tool(
-            cmd=[
-                "nmap",
-                f"-p{rdp_port}",
-                "--script", "rdp-vuln-ms19-0708",
-                target,
-            ],
-            output_file=bluekeep_out,
-            timeout=config.default_timeout,
-        )
-        raw_outputs.append(stdout or stderr)
-
-        if rc == 0 and stdout:
+            # ── Check BlueKeep (CVE-2019-0708) ──────────────────────────
             if "ms19-0708" in stdout.lower() or "bluekeep" in stdout.lower():
                 if re.search(r"VULNERABLE", stdout, re.IGNORECASE):
                     findings.append(
@@ -258,9 +241,10 @@ async def run_rdp_module(
                             module=MODULE_NAME,
                         )
                     )
-    # No else needed — already warned about nmap above
+    else:
+        logger.warning("nmap not found — skipping RDP encryption, MS12-020 & BlueKeep checks")
 
-    # ── 3. Suggested RDP tools ──────────────────────────────────────────
+    # ── 2. Suggested RDP tools ──────────────────────────────────────────
     tool_suggestions: list[str] = []
     if shutil.which("xfreerdp"):
         tool_suggestions.append(f"xfreerdp /v:{target} /u:<USER> /p:<PASS> /cert:ignore")

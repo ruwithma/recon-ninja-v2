@@ -27,8 +27,8 @@ a single command.
 **Key highlights:**
 
 - 7-phase async pipeline with checkpoint/resume
-- 18 service modules (16 protocol-specific + OSINT + Vuln Correlation)
-- 30+ external tools tracked with version detection and auto-install
+- 20 service modules (15 protocol-specific + web orchestrator with 3 active sub-modules + OSINT + Vuln Correlation)
+- 46 external tools tracked with version detection and auto-install
 - Rich terminal UI with live progress bars, panels, and severity tables
 - Auto box-classification (WINDOWS_AD, LINUX_WEB, etc.)
 - Regex-based loot extraction (creds, flags, hashes, keys)
@@ -237,7 +237,7 @@ interrupted scans can be resumed with `--resume`.
 | **0** | Pre-flight | Target validation, VPN check, tool inventory, SecLists detection, output directory setup | Internal |
 | **1** | Port Discovery | Fast SYN scan for open ports; RustScan with nmap fallback; optional UDP scan | RustScan, nmap |
 | **2** | Deep Service Enumeration | `nmap -sC -sV -O` on discovered ports; XML parsing; hostname detection; box classification | nmap |
-| **3** | Service-Specific Modules | Concurrent module execution gated by semaphore; 16 protocol modules dispatched by detected services | Per-module (see below) |
+| **3** | Service-Specific Modules | Concurrent module execution gated by semaphore; 15 protocol modules + web orchestrator dispatched by detected services | Per-module (see below) |
 | **4** | OSINT | DNS enumeration, subdomain discovery, email/host harvesting | dnsrecon, subfinder, theHarvester |
 | **5** | Vulnerability Correlation | Exploit search for every product+version pair; template-based vulnerability scanning | searchsploit, nuclei, NVD API |
 | **6** | Loot Extraction | Regex scan of all output files for credentials, flags, hashes, and private keys | Internal (regex engine) |
@@ -251,18 +251,26 @@ blocks the rest of the pipeline.
 
 ## Service Modules
 
-18 modules are dispatched in Phase 3 based on the services discovered in
+20 modules are dispatched in Phase 3 based on the services discovered in
 Phases 1-2. Modules whose required tools are missing are gracefully skipped.
 
-### Web (5 sub-modules)
+### Web (3 active sub-modules)
+
+The web orchestrator runs three fast, CTF-focused sub-modules for each HTTP
+port discovered. Deep vuln scanners (nikto, nuclei) and CMS scanners are
+available as standalone modules but excluded from the default pipeline to
+keep scans fast and actionable.
 
 | Sub-module | Purpose | Tools |
 |-----------|---------|-------|
 | `web_core` | HTTP fingerprint, headers, robots.txt, sitemap, WAF detection, screenshots | whatweb, wafw00f, gowitness |
 | `web_tech` | Deep technology stack detection (frameworks, CMS, libraries, languages) | Wappalyzer, whatweb, nmap |
 | `web_dirfuzz` | Directory fuzzing, sensitive path probing, vhost enumeration | feroxbuster, gobuster, ffuf |
-| `web_cms` | CMS detection and scanning | wpscan, droopescan, joomscan |
-| `web_vuln` | Web vulnerability scanning | nikto, nuclei |
+
+> **Note:** `web_cms` (wpscan, droopescan, joomscan) and `web_vuln` (nikto,
+> nuclei) sub-modules exist in the codebase but are not wired into the default
+> scan pipeline. They can be activated by editing
+> `recon_ninja/modules/web/__init__.py` if needed.
 
 ### Protocol Modules
 
@@ -370,7 +378,7 @@ the following wordlists by default:
 
 - **Directory fuzzing:** `raft-medium-directories.txt` (or `common.txt` for `--fast`)
 - **Vhost fuzzing:** `subdomains-top1million-5000.txt`
-- **SNMP community strings:** `snmp.txt`
+- **SNMP community strings:** `snmp.txt` (or `common-snmp-community-strings.txt`)
 - **Username enumeration:** `xato-net-10-million-usernames-dup.txt`
 
 Override any wordlist with `--wordlist` or the `wordlists` config section.
@@ -448,12 +456,12 @@ recon_ninja/
 │   └── loot.py                  # Regex-based loot extractor
 ├── modules/
 │   ├── web/
-│   │   ├── __init__.py          # Web module orchestrator
+│   │   ├── __init__.py          # Web module orchestrator (runs core → tech → dirfuzz)
 │   │   ├── web_core.py          # whatweb, headers, robots.txt, screenshots
 │   │   ├── web_dirfuzz.py       # feroxbuster / gobuster / ffuf dir + vhost
 │   │   ├── web_tech.py          # Deep tech stack detection (Wappalyzer + custom rules)
-│   │   ├── web_vuln.py          # nikto, nuclei vulnerability scanning
-│   │   └── web_cms.py           # CMS detect → wpscan / droopescan / joomscan + API
+│   │   ├── web_vuln.py          # nikto, nuclei vulnerability scanning (not in default pipeline)
+│   │   └── web_cms.py           # CMS detect → wpscan / droopescan / joomscan (not in default pipeline)
 │   ├── smb.py                   # SMB enumeration and share access
 │   ├── ssh.py                   # SSH audit and banner analysis
 │   ├── ftp.py                   # FTP anonymous login and enumeration
@@ -484,23 +492,25 @@ recon_ninja/
 
 ## External Tools
 
-ReconNinja integrates with 30 external security tools. Required tools must
+ReconNinja integrates with 46 external security tools. Required tools must
 be present for a full scan; optional tools are gracefully skipped when missing.
 
-### Required (8)
+### Required (10)
 
 | Tool | Install | Purpose |
 |------|---------|---------|
 | nmap | `apt install nmap` | Network port scanner and service enumerator |
-| smbclient | `apt install samba-client` | SMB/CIFS client for share enumeration |
+| smbclient | `apt install smbclient` | SMB/CIFS client for share enumeration |
 | nikto | `apt install nikto` | Web server vulnerability scanner |
 | whatweb | `apt install whatweb` | Web technology fingerprinter |
 | sslscan | `apt install sslscan` | SSL/TLS cipher and certificate scanner |
 | dnsrecon | `apt install dnsrecon` | DNS enumeration and reconnaissance |
 | searchsploit | `apt install exploitdb` | Offline exploit database search |
 | ldapsearch | `apt install ldap-utils` | LDAP directory query client |
+| curl | `apt install curl` | URL transfer tool used by web modules |
+| dig | `apt install dnsutils` | DNS lookup utility used by DNS module |
 
-### Optional (22)
+### Optional (36)
 
 | Tool | Install Method | Purpose |
 |------|---------------|---------|
@@ -521,11 +531,25 @@ be present for a full scan; optional tools are gracefully skipped when missing.
 | enum4linux-ng | `pip install enum4linux-ng` | SMB/NetBIOS enumeration (next-gen) |
 | smbmap | `pip install smbmap` | SMB share permission enumeration |
 | droopescan | `pip install droopescan` | CMS vulnerability scanner (Drupal, etc.) |
+| python-Wappalyzer | `pip install python-Wappalyzer` | Wappalyzer tech detection engine (6,000+ fingerprints) |
 | onesixtyone | `apt install onesixtyone` | Fast SNMP community string brute forcer |
 | snmpwalk | `apt install snmp` | SNMP MIB tree walker |
 | wpscan | `gem install wpscan` | WordPress security scanner |
 | testssl.sh | `git clone https://github.com/drwetter/testssl.sh.git` | Comprehensive SSL/TLS testing |
 | joomscan | `git clone https://github.com/OWASP/joomscan.git` | Joomla CMS vulnerability scanner |
+| whois | `apt install whois` | Domain registration lookup |
+| showmount | `apt install nfs-common` | NFS export lister |
+| redis-cli | `apt install redis-tools` | Redis command-line client |
+| rpcclient | `apt install samba-common-bin` | SMB/RPC client |
+| rpcinfo | `apt install rpcbind` | RPC portmapper info |
+| smtp-user-enum | `apt install smtp-user-enum` | SMTP user enumeration |
+| xfreerdp | `apt install freerdp2-x11` | FreeRDP X11 client |
+| evil-winrm | `gem install evil-winrm` | WinRM shell client |
+| impacket-rpcdump | `pip install impacket` | Impacket RPC endpoint mapper |
+| shodan | `pip install shodan` | Shodan CLI for OSINT lookups |
+| wafw00f | `pip install wafw00f` | Web application firewall detector |
+| dnsenum | `apt install dnsenum` | DNS enumeration tool |
+| tnscmd10g | `apt install tnscmd10g` | Oracle TNS command tool |
 
 ### Tool detection
 

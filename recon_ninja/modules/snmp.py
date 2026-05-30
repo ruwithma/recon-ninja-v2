@@ -78,7 +78,8 @@ async def run_snmp_module(
             snmp_wordlist = Path("/usr/share/wordlists/seclists/Discovery/SNMP/snmp.txt")
         if not snmp_wordlist.is_file():
             # Fallback: use a minimal built-in list
-            snmp_wordlist = Path("/tmp/recon_ninja_snmp_wordlist.txt")
+            import tempfile
+            snmp_wordlist = Path(tempfile.mkstemp(prefix="recon_ninja_snmp_", suffix=".txt")[1])
             snmp_wordlist.write_text("public\nprivate\ncommunity\n", encoding="utf-8")
 
         logger.info("[%s] Running onesixtyone against %s", MODULE_NAME, target)
@@ -296,18 +297,10 @@ def _extract_snmp_usernames(output: str) -> list[str]:
                     seen.add(username)
                     usernames.append(username)
 
-    # Linux/Unix user OID (hrSWRunName / hrSWRunPath)
-    for line in output.splitlines():
-        if "1.3.6.1.2.1.25.4.2.1" in line:
-            match = re.search(r'STRING:\s*"([^"]+)"', line)
-            if match:
-                proc_name = match.group(1)
-                # Some process names indicate user sessions
-                if proc_name not in seen and not proc_name.startswith("/"):
-                    # Filter obvious non-usernames
-                    if not any(kw in proc_name.lower() for kw in ("daemon", "system", "kernel")):
-                        seen.add(proc_name)
-                        usernames.append(proc_name)
+    # NOTE: OID 1.3.6.1.2.1.25.4.2.1 (hrSWRunName) lists RUNNING PROCESSES,
+    # not usernames. Process names are extracted separately by
+    # _extract_snmp_processes() — do NOT add them to the username list
+    # as they create false positives for brute-force attacks.
 
     return usernames
 
