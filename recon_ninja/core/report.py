@@ -521,7 +521,7 @@ def _build_markdown(state: ScanState) -> str:
         ports_with_techs = sorted({t.port for t in state.detected_techs})
         for port in ports_with_techs:
             port_techs = [t for t in state.detected_techs if t.port == port]
-            lines.append(f"### Port {port}\n")
+            lines.append(f"### {'OS (host-level)' if port == 0 else f'Port {port}'}\n")
             lines.append("| Technology | Version | Category | Confidence | Source | Vulnerable | CVEs |")
             lines.append("|------------|---------|----------|------------|--------|------------|------|")
             for tech in port_techs:
@@ -589,7 +589,12 @@ def _build_markdown(state: ScanState) -> str:
     # Combine finding-level commands with context-aware attack paths
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
     context_cmds = _generate_attack_paths(state)
-    all_cmds = finding_cmds + [c for c in context_cmds if c not in set(finding_cmds)]
+    # Merge context commands with finding commands using normalized dedup
+    finding_norms = {cmd.lower().strip() for cmd in finding_cmds}
+    all_cmds = finding_cmds + [
+        c for c in context_cmds
+        if c.lower().strip() not in finding_norms
+    ]
     if all_cmds:
         for i, cmd in enumerate(all_cmds[:20], 1):
             lines.append(f"{i}. `{cmd}`")
@@ -776,7 +781,12 @@ def _build_html(state: ScanState) -> str:
     # Attack commands
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
     context_cmds = _generate_attack_paths(state)
-    attack_commands = finding_cmds + [c for c in context_cmds if c not in set(finding_cmds)]
+    # Merge finding commands with context commands using normalized dedup
+    finding_norms = {cmd.lower().strip() for cmd in finding_cmds}
+    attack_commands = finding_cmds + [
+        c for c in context_cmds
+        if c.lower().strip() not in finding_norms
+    ]
 
     # Output files
     output_files = _collect_output_files(state)
@@ -958,6 +968,10 @@ def _extract_loot(state: ScanState) -> dict[str, list[str]]:
 def _deduplicated_commands(findings: list[Finding], limit: int = 10) -> list[str]:
     """Return deduplicated suggested commands from *findings*, up to *limit*.
 
+    Uses normalized comparison (lowercased, whitespace-collapsed) so that
+    near-duplicate commands like ``searchsploit Nginx`` and
+    ``searchsploit nginx`` are properly deduplicated.
+
     Parameters
     ----------
     findings:
@@ -970,12 +984,14 @@ def _deduplicated_commands(findings: list[Finding], limit: int = 10) -> list[str
     list[str]
         Ordered, deduplicated command strings.
     """
-    seen: set[str] = set()
+    seen_normalized: set[str] = set()
     commands: list[str] = []
     for finding in sorted(findings, key=lambda f: f.severity.rank):
         for cmd in finding.suggested_commands:
-            if cmd not in seen:
-                seen.add(cmd)
+            norm = cmd.lower().strip()
+            norm = re.sub(r"\s+", " ", norm)
+            if norm not in seen_normalized:
+                seen_normalized.add(norm)
                 commands.append(cmd)
             if len(commands) >= limit:
                 return commands
@@ -1059,12 +1075,14 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
             web_ports.append(p)
     for wp in web_ports:
         scheme = "https" if wp in (443, 8443, 4443) else "http"
-        url = f"{scheme}://{hostname}:{wp}"
+        # Omit default ports from URLs for cleaner commands
+        if (scheme == "http" and wp == 80) or (scheme == "https" and wp == 443):
+            url = f"{scheme}://{hostname}"
+        else:
+            url = f"{scheme}://{hostname}:{wp}"
         commands.append(f"nmap -p{wp} --script http-enum,http-headers,http-methods,http-vuln* {target}")
         commands.append(f"nikto -h {url}")
         commands.append(f"feroxbuster -u {url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt")
-        commands.append(f"gobuster dir -u {url} -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt")
-        # Only suggest one curl per web port
         commands.append(f"curl -sI {url}  # Check headers for tech stack")
         break  # One set of web commands is enough; adjust port manually
 
@@ -1126,7 +1144,11 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
     # --- Tech-specific attack paths ---
     for wp in web_ports:
         scheme = "https" if wp in (443, 8443, 4443) else "http"
-        url = f"{scheme}://{hostname}:{wp}"
+        # Omit default ports from URLs for cleaner commands
+        if (scheme == "http" and wp == 80) or (scheme == "https" and wp == 443):
+            url = f"{scheme}://{hostname}"
+        else:
+            url = f"{scheme}://{hostname}:{wp}"
 
         port_techs = [t for t in techs if t.port == wp]
 
@@ -1187,12 +1209,19 @@ def _generate_attack_paths(state: ScanState) -> list[str]:
     # --- Nuclei ---
     commands.append(f"nuclei -u {target} -t /usr/share/nuclei-templates/")
 
-    # Deduplicate while preserving order
-    seen: set[str] = set()
+    # Deduplicate while preserving order — use normalized comparison
+    # to catch near-duplicates like "searchsploit Nginx" vs "searchsploit nginx"
+    seen_normalized: set[str] = set()
     unique: list[str] = []
     for cmd in commands:
-        if cmd not in seen:
-            seen.add(cmd)
+        # Normalize: lowercase, collapse whitespace, strip comments for comparison
+        norm = cmd.lower().strip()
+        # Remove inline comments for dedup comparison
+        norm = re.sub(r"\s*#.*$", "", norm).strip()
+        # Collapse multiple spaces
+        norm = re.sub(r"\s+", " ", norm)
+        if norm not in seen_normalized:
+            seen_normalized.add(norm)
             unique.append(cmd)
 
     return unique[:25]  # cap at 25 suggestions

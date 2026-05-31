@@ -396,8 +396,10 @@ def display_tech_stack(techs: list[TechInfo]) -> None:
     for port in ports_with_techs:
         port_techs = [t for t in techs if t.port == port]
 
+        # Use a descriptive label for port 0 (OS-level detection)
+        port_label = "OS (host-level)" if port == 0 else f"Port {port}"
         table = Table(
-            title=f"[bold bright_cyan] Tech Stack — Port {port} [/]",
+            title=f"[bold bright_cyan] Tech Stack — {port_label} [/]",
             show_header=True,
             header_style="bold white",
             border_style="cyan",
@@ -595,12 +597,15 @@ def display_next_steps(findings: list[Finding]) -> None:
     console = get_console()
 
     # Collect and deduplicate commands while preserving order
+    # Use normalized comparison to catch near-duplicates
     seen: set[str] = set()
     commands: list[str] = []
     for finding in sorted(findings, key=lambda f: f.severity.rank):
         for cmd in finding.suggested_commands:
-            if cmd not in seen:
-                seen.add(cmd)
+            norm = cmd.lower().strip()
+            norm = re.sub(r"\s+", " ", norm)
+            if norm not in seen:
+                seen.add(norm)
                 commands.append(cmd)
             if len(commands) >= 8:
                 break
@@ -699,7 +704,13 @@ def display_attack_paths(state: ScanState) -> None:
 
     finding_cmds = _deduplicated_commands(state.all_findings, limit=10)
     context_cmds = _generate_attack_paths(state)
-    all_cmds = finding_cmds + [c for c in context_cmds if c not in set(finding_cmds)]
+    # Merge: context commands that aren't already in finding commands
+    # Use normalized comparison for proper dedup
+    finding_norms = {cmd.lower().strip() for cmd in finding_cmds}
+    all_cmds = finding_cmds + [
+        c for c in context_cmds
+        if c.lower().strip() not in finding_norms
+    ]
 
     if not all_cmds:
         console.print("[dim]No suggested attack paths.[/]")
@@ -793,13 +804,34 @@ def display_scan_summary(state: ScanState) -> None:
 
 
 def _extract_loot_counts(state: ScanState) -> dict[str, int]:
-    """Derive loot category counts from module raw output.
+    """Derive loot category counts from the actual loot extraction results.
 
-    This is a best-effort heuristic that scans raw output for common
-    patterns.  In the future, modules should push structured loot data
-    into the state.
+    Uses the structured loot data from the ``loot`` module if available
+    (stored in module results), falling back to a best-effort heuristic
+    scan of raw output if the loot module hasn't run yet.
     """
-    counts: dict[str, int] = {
+    counts: dict[str, int] = {}
+
+    # First, check if the loot module has already run and stored results.
+    # Loot findings have module="loot" and title like "Loot: Hashes extracted"
+    for finding in state.all_findings:
+        if finding.module == "loot" and finding.title.startswith("Loot:"):
+            # Extract category from "Loot: Category extracted"
+            cat_match = re.search(r"Loot:\s+(\w+)", finding.title)
+            if cat_match:
+                cat = cat_match.group(1).lower()
+                # Count from description: "Extracted N category from scan output."
+                cnt_match = re.search(r"Extracted\s+(\d+)", finding.description or "")
+                if cnt_match:
+                    counts[cat] = int(cnt_match.group(1))
+
+    if counts:
+        return counts
+
+    # Fallback: best-effort heuristic scan of raw module output.
+    # This path is used when the display is called before the loot phase
+    # has completed (e.g. during Phase 3 mid-scan display).
+    fallback_counts: dict[str, int] = {
         "usernames": 0,
         "hashes": 0,
         "emails": 0,
@@ -809,13 +841,13 @@ def _extract_loot_counts(state: ScanState) -> dict[str, int]:
     for result in state.module_results:
         raw = result.raw_output.lower()
         if "username" in raw or "user:" in raw or "accounts:" in raw:
-            counts["usernames"] += raw.count("\n")  # rough estimate
+            fallback_counts["usernames"] += raw.count("\n")  # rough estimate
         if "hash" in raw or "ntlm" in raw or "kerberoast" in raw:
-            counts["hashes"] += raw.count("\n")
+            fallback_counts["hashes"] += raw.count("\n")
         if "share" in raw or "enum4linux" in result.module_name.lower():
-            counts["shares"] += raw.count("\n")
+            fallback_counts["shares"] += raw.count("\n")
 
-    return counts
+    return fallback_counts
 
 
 def _display_footer(state: ScanState) -> None:
@@ -1171,9 +1203,9 @@ def display_exploit_results(findings: list[Finding]) -> None:
         border_style="red",
         title_style="bold bright_red",
     )
-    table.add_column("Query", style="bold", min_width=16)
+    table.add_column("Query", style="bold", min_width=20)
     table.add_column("Count", justify="right", width=6)
-    table.add_column("Top Exploits", min_width=40)
+    table.add_column("Top Exploits", min_width=50, max_width=80)
 
     import re as _re
     for f in findings:
@@ -1193,17 +1225,36 @@ def display_exploit_results(findings: list[Finding]) -> None:
             if broad_match:
                 query = broad_match.group(1)
 
-        # Get top exploits from description
+        # Get top exploits from description — don't truncate aggressively
         top = ""
         top_match = _re.search(r"Top results?:\s*(.+)", f.description or "")
         if top_match:
-            top = top_match.group(1)[:100]
+            top = top_match.group(1)
+            # If text is very long, show first ~200 chars and add ellipsis
+            if len(top) > 200:
+                top = top[:197] + "..."
+
+        # For the "no specific exploits found" case, show the broad
+        # query hint instead of a truncated mid-sentence fragment
+        if not top and f.description:
+            if "No exploits found for" in f.description:
+                # Extract the broader query hint
+                broad_hint_match = _re.search(
+                    r"but\s+\d+\s+found\s+for\s+broader\s+query\s+'([^']+)'",
+                    f.description,
+                )
+                if broad_hint_match:
+                    top = f"No specific exploits; try broader: {broad_hint_match.group(1)}"
+                else:
+                    top = _truncate(f.description, 120)
+            else:
+                top = _truncate(f.description, 120)
 
         sev_style = f.severity.rich_style if hasattr(f.severity, "rich_style") else "white"
         table.add_row(
-            query or title[:40],
+            query or _truncate(title, 50),
             f"[{sev_style}]{count}[/]",
-            top or f.description[:80] if f.description else "—",
+            top or "—",
         )
 
     console.print(table)

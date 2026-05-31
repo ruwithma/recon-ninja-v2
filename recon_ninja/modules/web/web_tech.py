@@ -921,20 +921,38 @@ def _detect_os_from_nmap(services: dict[int, Any]) -> list[TechInfo]:
 
         for pattern, os_name in os_patterns:
             if pattern in combined and os_name not in detected_os:
-                # Try to extract version
+                # Try to extract version — prefer proper version numbers
+                # (e.g. "Ubuntu 24.04" or "Ubuntu 22.04.3") over the
+                # nmap codename fragment (e.g. "3" from "3ubuntu13.15").
                 version = ""
+                # First try: standard version like "Ubuntu 24.04" or "Debian 11.3"
                 ver_match = re.search(
-                    re.escape(pattern) + r"\s*([\d.]+)",
+                    re.escape(pattern) + r"\s+([\d]+\.[\d]+(?:\.[\d]+)?)",
                     combined,
                     re.IGNORECASE,
                 )
                 if ver_match:
                     version = ver_match.group(1)
-                # Also check for Ubuntu codename version from nmap OS string
-                if os_name == "Ubuntu" and not version:
-                    ub_match = re.search(r"ubuntu\s*([\d.]+)", combined, re.IGNORECASE)
-                    if ub_match:
-                        version = ub_match.group(1)
+                # Second try: just major version like "Ubuntu 22"
+                if not version:
+                    ver_match2 = re.search(
+                        re.escape(pattern) + r"\s+(\d{2,})\b",
+                        combined,
+                        re.IGNORECASE,
+                    )
+                    if ver_match2:
+                        version = ver_match2.group(1)
+                # Third try: nmap-style codename like "3ubuntu13.15"
+                # This is NOT the Ubuntu OS version — it's a Debian package
+                # revision number (e.g. "3ubuntu13.15" means Debian revision
+                # 3 of Ubuntu package 13.15).  We must NOT use this as the
+                # Ubuntu OS version.  The nmap string "9.6p1 Ubuntu 3ubuntu13.15"
+                # tells us the host runs Ubuntu but does NOT tell us which
+                # version (e.g. 22.04, 24.04).  Leave version empty rather
+                # than showing a misleading "3".
+                # If we already have a version from the first two tries, keep it.
+                # Otherwise, just detect "Ubuntu" without a version number.
+                pass
 
                 detected_os.add(os_name)
                 techs.append(TechInfo(

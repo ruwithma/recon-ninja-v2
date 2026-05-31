@@ -327,18 +327,31 @@ def _severity_for_status(status: int, path: str) -> Severity:
 
 
 async def _head_status(url: str, path: str) -> tuple[int | None, str, int]:
-    """Run a HEAD request and return status code, redirect URL, and size."""
+    """Run a GET request (discarding body) and return status code, redirect URL, and size.
+
+    Uses ``curl -s -o /dev/null`` (NOT ``-I``/HEAD) because:
+
+    * HEAD requests return ``size_download=0`` since no body is transferred.
+    * Many SPA / catch-all servers return HTTP 200 for *every* path with
+      the same HTML body — the only way to detect this is by comparing
+      response body sizes, which requires actually downloading the body.
+    * ``-o /dev/null`` discards the body so memory usage stays low.
+
+    Returns ``(status_code, redirect_url, size)`` where *size* is the
+    number of bytes in the response body.
+    """
     full_url = f"{url}{path}"
     try:
         _rc, stdout, _stderr = await run_tool(
             cmd=[
-                "curl", "-sI", "-o", "/dev/null",
+                "curl", "-s", "-o", "/dev/null",
                 "-w", "%{http_code} %{redirect_url} %{size_download}",
                 "--connect-timeout", "3",
-                "--max-time", "5",
+                "--max-time", "8",
+                "-L",  # follow redirects to get final size
                 full_url,
             ],
-            timeout=10,
+            timeout=12,
         )
         parts = stdout.strip().split(maxsplit=2)
         if not parts:
@@ -398,9 +411,10 @@ async def _check_path(  # noqa: C901
             return None
         if status == 404:
             return None
-        # Baseline comparison: filter only if both status AND size match.
-        # A 200 response with a DIFFERENT size than the baseline is
-        # genuinely different content — don't filter it!
+        # Baseline comparison: filter responses that match the catch-all /
+        # wildcard default page.  Many SPAs and misconfigured servers return
+        # HTTP 200 with the same HTML for *every* URL — we detect this by
+        # comparing the response body size against a known-nonexistent path.
         if baseline_status is not None and status == baseline_status:
             if status in (301, 302, 307, 308):
                 if redirect_url == baseline_redirect:
@@ -410,10 +424,33 @@ async def _check_path(  # noqa: C901
                 size_diff = abs(size - baseline_size) / max(baseline_size, 1)
                 if size_diff < 0.1:
                     return None
-            else:
-                # Same status but no size info — be conservative and
-                # keep the finding (better false positive than miss)
-                pass
+            elif baseline_size > 0 and size == 0:
+                # We got a body size of 0 but the baseline had content.
+                # This is suspicious — could be an empty redirect or
+                # error.  Keep the finding but log it.
+                logger.debug(
+                    "Path %s returned 0B (baseline %dB) — keeping",
+                    path, baseline_size,
+                )
+            # If both sizes are 0, we can't compare.  In this case,
+            # the response is very likely the same default page —
+            # filter it as a false positive.  Genuine sensitive files
+            # (.env, .git, config.php.bak) almost always have non-zero
+            # content, and feroxbuster/gobuster will find them anyway.
+            elif baseline_size == 0 and size == 0:
+                # Exception: keep if the path is a known sensitive path
+                # that might genuinely be empty (e.g. a blank .env file
+                # is still interesting because it reveals the app uses
+                # environment variables).
+                always_keep = {".env", ".git/", ".git/HEAD", ".htpasswd",
+                               "config.php.bak", "web.config", ".htaccess"}
+                if path.rstrip("/") not in always_keep and path not in always_keep:
+                    logger.debug(
+                        "Filtering likely false-positive %s "
+                        "(0B response matches baseline)",
+                        path,
+                    )
+                    return None
 
         # Path exists — adjust severity
         actual_sev = _severity_for_status(status, path)

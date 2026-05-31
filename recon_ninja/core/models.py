@@ -355,7 +355,11 @@ class ScanState:
 
         Deduplication strategy:
         1. Exact match on (title, module) — same finding from same module
-        2. Cross-module dedup for known-duplicate patterns only:
+        2. Cross-vhost dedup for directory/path findings — same path and
+           status found on different vhosts (e.g. /admin on both
+           silentium.htb and staging.silentium.htb) is collapsed into
+           one finding that mentions both hosts
+        3. Cross-module dedup for known-duplicate patterns only:
            - Missing security headers (reported by web_core, nikto, nuclei)
            - WAF detection (reported by web_core and nuclei)
            - Server banners (reported by multiple tools)
@@ -364,6 +368,42 @@ class ScanState:
         for existing in self.all_findings:
             if existing.title == finding.title and existing.module == finding.module:
                 return
+
+        # Cross-vhost dedup for directory/path findings:
+        # If "/admin (HTTP 200)" was found on silentium.htb and
+        # the same path+status is now found on staging.silentium.htb,
+        # merge them into one finding rather than creating duplicates.
+        if finding.module == "web_dirfuzz" and (
+            finding.title.startswith("Path found:") or finding.title.startswith("Fuzz:")
+        ):
+            # Extract the path+status core (without the host-specific part)
+            # e.g. "Path found: /admin (HTTP 200)" → "pathfoundadminhttp200"
+            finding_core = _URL_RE.sub("", finding.title.lower())
+            finding_core = _NONALNUM_RE.sub("", finding_core)
+            for prefix in ("pathfound", "fuzz"):
+                finding_core = finding_core.replace(prefix, "")
+
+            for existing in self.all_findings:
+                if existing.module != "web_dirfuzz":
+                    continue
+                if not (existing.title.startswith("Path found:")
+                        or existing.title.startswith("Fuzz:")):
+                    continue
+                existing_core = _URL_RE.sub("", existing.title.lower())
+                existing_core = _NONALNUM_RE.sub("", existing_core)
+                for prefix in ("pathfound", "fuzz"):
+                    existing_core = existing_core.replace(prefix, "")
+
+                if finding_core and existing_core and finding_core == existing_core:
+                    # Same path+status on different host — merge descriptions
+                    # Keep the higher severity and update description to
+                    # mention both hosts
+                    if finding.severity.rank < existing.severity.rank:
+                        existing.severity = finding.severity
+                    # Append the new host to the description if it's different
+                    if finding.description not in existing.description:
+                        existing.description += f"; also {finding.description}"
+                    return
 
         # Cross-module dedup: only for known duplicate patterns that
         # flood the output.  We check for specific keywords rather than
